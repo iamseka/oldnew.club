@@ -1,0 +1,250 @@
+import React, { useEffect, useRef } from "react"
+import { addPropertyControls, ControlType } from "framer"
+import * as THREE from "three"
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js"
+
+const OBJLoaderCDN =
+    "https://cdn.jsdelivr.net/npm/three@0.136/examples/jsm/loaders/OBJLoader.js"
+const MTLLoaderCDN =
+    "https://cdn.jsdelivr.net/npm/three@0.136/examples/jsm/loaders/MTLLoader.js"
+
+export default function ThreeDModel({
+    objUrl,
+    mtlUrl,
+    cameraX = 0,
+    cameraY = 2,
+    cameraZ = 10,
+    modelX = 0,
+    modelY = 0,
+    modelZ = 0,
+    modelScale = 2,
+    rotationSpeed = 0.01,
+    rotationDirection = 1,
+}) {
+    const mountRef = useRef(null)
+    const objectRef = useRef(null)
+    const animationRef = useRef(null)
+    const controlsRef = useRef(null)
+
+    useEffect(() => {
+        if (!mountRef.current || !objUrl) {
+            console.error("❌ Missing mount reference or OBJ URL")
+            return
+        }
+
+        const loadModules = async () => {
+            try {
+                const { OBJLoader } = await import(
+                    /* @vite-ignore */ OBJLoaderCDN
+                )
+                const { MTLLoader } = await import(
+                    /* @vite-ignore */ MTLLoaderCDN
+                )
+
+                const scene = new THREE.Scene()
+                const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 1000)
+                camera.position.set(cameraX, cameraY, cameraZ)
+
+                const renderer = new THREE.WebGLRenderer({
+                    alpha: true,
+                    antialias: true,
+                })
+                renderer.shadowMap.enabled = true
+                renderer.setSize(
+                    mountRef.current.clientWidth,
+                    mountRef.current.clientHeight
+                )
+                renderer.setPixelRatio(window.devicePixelRatio)
+                mountRef.current.appendChild(renderer.domElement)
+
+                const controls = new OrbitControls(camera, renderer.domElement)
+                controls.autoRotate = false
+                controls.enableDamping = true
+                controls.dampingFactor = 0.1
+                controls.enableZoom = false
+                controls.enablePan = false
+                controls.minPolarAngle = Math.PI / 2
+                controls.maxPolarAngle = Math.PI / 2
+                controls.touches.ONE = THREE.TOUCH.ROTATE
+                controls.touches.TWO = THREE.TOUCH.NONE
+                controls.minAzimuthAngle = -Infinity
+                controls.maxAzimuthAngle = Infinity
+
+                controlsRef.current = controls
+
+                // **Fix: Stop Interaction if Pointer Leaves**
+                const stopInteraction = () => {
+                    controls.enabled = false
+                    setTimeout(() => (controls.enabled = true), 10) // Reactivate after release
+                }
+
+                renderer.domElement.addEventListener("pointerdown", () => {
+                    controls.enabled = true
+                })
+                renderer.domElement.addEventListener(
+                    "pointerup",
+                    stopInteraction
+                )
+                renderer.domElement.addEventListener(
+                    "pointerleave",
+                    stopInteraction
+                )
+
+                const rotationGroup = new THREE.Group()
+                scene.add(rotationGroup)
+
+                const loadModel = (object) => {
+                    object.traverse((child) => {
+                        if (child instanceof THREE.Mesh) {
+                            if (child.material.map) {
+                                child.material.map.anisotropy = Math.min(
+                                    8,
+                                    renderer.capabilities.getMaxAnisotropy()
+                                )
+                                child.material.map.needsUpdate = true
+                            }
+                            child.castShadow = true
+                            child.receiveShadow = true
+                        }
+                    })
+
+                    const boundingBox = new THREE.Box3().setFromObject(object)
+                    if (boundingBox.isEmpty()) {
+                        console.error("❌ Model bounding box is empty")
+                        return
+                    }
+                    boundingBox.expandByScalar(0.05)
+
+                    const center = new THREE.Vector3()
+                    boundingBox.getCenter(center)
+                    const size = boundingBox.getSize(new THREE.Vector3())
+
+                    object.position.set(-center.x, -center.y, -center.z)
+
+                    const modelGroup = new THREE.Group()
+                    modelGroup.add(object)
+                    modelGroup.scale.set(modelScale, modelScale, modelScale)
+                    modelGroup.position.set(0, 0, 0)
+
+                    objectRef.current = modelGroup
+                    rotationGroup.add(modelGroup)
+                }
+
+                if (mtlUrl) {
+                    const mtlLoader = new MTLLoader()
+                    mtlLoader.load(
+                        mtlUrl,
+                        (materials) => {
+                            materials.preload()
+                            const objLoader = new OBJLoader()
+                            objLoader.setMaterials(materials)
+                            objLoader.load(objUrl, loadModel)
+                        },
+                        undefined,
+                        (error) => {
+                            console.error("❌ Error loading MTL file:", error)
+                        }
+                    )
+                } else {
+                    const objLoader = new OBJLoader()
+                    objLoader.load(objUrl, loadModel, undefined, (error) => {
+                        console.error("❌ Error loading OBJ file:", error)
+                    })
+                }
+
+                // **Fixed Lighting - Always Above Camera and Static**
+                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5)
+                scene.add(ambientLight)
+
+                const directionalLight = new THREE.DirectionalLight(
+                    0xffffff,
+                    0.8
+                )
+                directionalLight.position.set(0, 5, 10)
+                directionalLight.target.position.set(0, 0, 0)
+                scene.add(directionalLight)
+                scene.add(directionalLight.target)
+
+                camera.add(directionalLight)
+                camera.add(directionalLight.target)
+                scene.add(camera)
+
+                // **Resize Handler for Dynamic Scaling**
+                const handleResize = () => {
+                    const { clientWidth, clientHeight } = mountRef.current
+                    renderer.setSize(clientWidth, clientHeight)
+                    camera.aspect = clientWidth / clientHeight
+                    camera.updateProjectionMatrix()
+                }
+
+                window.addEventListener("resize", handleResize)
+
+                const animate = () => {
+                    animationRef.current = requestAnimationFrame(animate)
+                    if (objectRef.current) {
+                        objectRef.current.rotation.y +=
+                            rotationSpeed * rotationDirection
+                    }
+                    controls.update()
+                    renderer.render(scene, camera)
+                }
+                animate()
+            } catch (error) {
+                console.error(
+                    "❌ Error loading modules or setting up scene:",
+                    error
+                )
+            }
+        }
+
+        loadModules()
+
+        return () => {
+            cancelAnimationFrame(animationRef.current)
+            window.removeEventListener("resize", handleResize)
+            if (mountRef.current) {
+                mountRef.current.removeChild(mountRef.current.firstChild)
+            }
+        }
+    }, [
+        objUrl,
+        mtlUrl,
+        cameraX,
+        cameraY,
+        cameraZ,
+        modelX,
+        modelY,
+        modelZ,
+        modelScale,
+        rotationSpeed,
+        rotationDirection,
+    ])
+
+    return (
+        <div
+            ref={mountRef}
+            style={{ width: "100%", height: "100%", overflow: "visible" }}
+        />
+    )
+}
+
+addPropertyControls(ThreeDModel, {
+    objUrl: { type: ControlType.String, title: "OBJ URL" },
+    mtlUrl: { type: ControlType.String, title: "MTL URL" },
+    cameraX: { type: ControlType.Number, title: "Camera X" },
+    cameraY: { type: ControlType.Number, title: "Camera Y" },
+    cameraZ: { type: ControlType.Number, title: "Camera Z" },
+    modelX: { type: ControlType.Number, title: "Model X" },
+    modelY: { type: ControlType.Number, title: "Model Y" },
+    modelZ: { type: ControlType.Number, title: "Model Z" },
+    modelScale: { type: ControlType.Number, title: "Model Scale" },
+    rotationSpeed: { type: ControlType.Number, title: "Rotation Speed" },
+    rotationDirection: {
+        type: ControlType.Enum,
+        title: "Rotation Direction",
+        options: [1, -1, 0],
+        optionTitles: ["CW", "CCW", "0"],
+    },
+})
+
+// 3/8 stable baseline for single models, crashes with additional models
