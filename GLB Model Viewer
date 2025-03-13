@@ -209,4 +209,10 @@ addPropertyControls(ThreeDModel, {
 })
 
 // **📝 Notes:**
-// 3/13 final code stable
+// 3/13 stable
+// 3/13 issues:
+//    scroll passthrough on touch
+//    responsive web: model position
+//        models do not stay center in scale down to mobile
+//        out of view in scale up to widescreen desktop
+//    color slightly washed out
