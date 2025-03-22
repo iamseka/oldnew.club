@@ -1,23 +1,27 @@
 import React, { useEffect, useRef } from "react";
 import { addPropertyControls, ControlType } from "framer";
 
-const GLTFLoaderCDN = "https://cdn.jsdelivr.net/npm/three@0.136/examples/jsm/loaders/GLTFLoader.js";
+// CDN links
+const ThreeJSURL = "https://unpkg.com/three@0.136.0/build/three.min.js";
+const GLTFLoaderURL = "https://unpkg.com/three@0.136.0/examples/js/loaders/GLTFLoader.js";
+const OrbitControlsURL = "https://unpkg.com/three@0.136.0/examples/js/controls/OrbitControls.js";
 
-const loadGLTFLoader = async () => {
-    try {
-        const module = await import(/* @vite-ignore */ GLTFLoaderCDN);
-        return module.GLTFLoader;
-    } catch (error) {
-        console.error("❌ Failed to load GLTFLoader from CDN:", error);
-        return null;
-    }
+const loadScript = (url) => {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement("script");
+        script.src = url;
+        script.async = true;
+        script.onload = () => resolve(true);
+        script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
+        document.head.appendChild(script);
+    });
 };
 
 export default function ThreeDModel({
     glbUrl,
     cameraX = 0,
     cameraY = 0,
-    cameraZ = 0,
+    cameraZ = 10,
     modelX = 0,
     modelY = 0,
     modelZ = 0,
@@ -38,13 +42,31 @@ export default function ThreeDModel({
 
         const loadModules = async () => {
             try {
-                const GLTFLoader = await loadGLTFLoader();
-                if (!GLTFLoader) return;
+                console.log("🔍 Initializing Three.js Scene...");
 
-                const THREE = await import("three");
+                await loadScript(ThreeJSURL);
+                const THREE = window.THREE;
+                if (!THREE) throw new Error("THREE not found on window");
+                console.log("✅ Three.js Loaded");
+
+                await loadScript(GLTFLoaderURL);
+                await loadScript(OrbitControlsURL);
+
+                const OrbitControls = window.THREE.OrbitControls || window.OrbitControls;
+                const GLTFLoader = window.THREE.GLTFLoader || window.GLTFLoader;
+
+                if (!OrbitControls || !GLTFLoader) {
+                    throw new Error("❌ OrbitControls or GLTFLoader not found after script load");
+                }
+
+                if (!THREE.OrbitControls) THREE.OrbitControls = OrbitControls;
+                if (!THREE.GLTFLoader) THREE.GLTFLoader = GLTFLoader;
+
+                console.log("✅ GLTFLoader and OrbitControls loaded");
+
                 const scene = new THREE.Scene();
+                scene.background = new THREE.Color(0xeeeeee); // Light gray background
 
-                // **Camera Setup**
                 const camera = new THREE.PerspectiveCamera(
                     50,
                     mountRef.current.clientWidth / mountRef.current.clientHeight,
@@ -52,76 +74,60 @@ export default function ThreeDModel({
                     1000
                 );
                 camera.position.set(cameraX, cameraY, cameraZ);
-                camera.lookAt(new THREE.Vector3(0, 0, 0));
 
                 const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-                renderer.shadowMap.enabled = true;
-                renderer.outputEncoding = THREE.sRGBEncoding;
                 renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
                 renderer.setPixelRatio(window.devicePixelRatio);
                 mountRef.current.appendChild(renderer.domElement);
 
-                // **Orbit Controls**
-                const { OrbitControls } = await import("three/examples/jsm/controls/OrbitControls.js");
-                const controls = new OrbitControls(camera, renderer.domElement);
+                const controls = new THREE.OrbitControls(camera, renderer.domElement);
                 controls.enableDamping = true;
-                controls.dampingFactor = 0.1;
-                controls.enableZoom = false;
-                controls.enablePan = false;
-                controls.minPolarAngle = Math.PI / 2;
-                controls.maxPolarAngle = Math.PI / 2;
-                controls.touches.ONE = THREE.TOUCH.ROTATE;
-                controls.touches.TWO = THREE.TOUCH.NONE;
                 controlsRef.current = controls;
 
-                // **Lighting Setup**
-                const ambientLight = new THREE.AmbientLight(0xffffff, 0.5);
-                scene.add(ambientLight);
+                scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+                const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
+                dirLight.position.set(5, 10, 5);
+                scene.add(dirLight);
 
-                const staticLight = new THREE.DirectionalLight(0xffffff, 0.5);
-                staticLight.position.set(5, 10, 5);
-                staticLight.castShadow = true;
-                scene.add(staticLight);
+                const axesHelper = new THREE.AxesHelper(5);
+                scene.add(axesHelper);
 
-                // **GLTF Loader**
-                const loader = new GLTFLoader();
+                const loader = new THREE.GLTFLoader();
                 loader.load(
                     glbUrl,
                     (gltf) => {
                         const model = gltf.scene;
+                        console.log("📦 Loaded Model Details:", model);
+                        console.log("🧱 Children:", model.children);
                         model.traverse((child) => {
-                            if (child instanceof THREE.Mesh) {
-                                child.castShadow = true;
-                                child.receiveShadow = true;
-                                if (child.material) {
-                                    child.material.color.convertSRGBToLinear();
-                                }
-                            }
+                            console.log("🔎 Traversed Node:", child.name, child.type, child);
                         });
 
-                        // **Bounding Box Centering**
-                        const boundingBox = new THREE.Box3().setFromObject(model);
-                        const center = new THREE.Vector3();
-                        boundingBox.getCenter(center);
-                        const size = boundingBox.getSize(new THREE.Vector3());
-
-                        model.position.set(modelX - center.x, modelY - center.y, modelZ - center.z);
+                        model.position.set(modelX, modelY, modelZ);
                         model.scale.set(modelScale, modelScale, modelScale);
-                        objectRef.current = model;
                         scene.add(model);
+                        objectRef.current = model;
 
-                        // **Adjust Camera to Fit Model**
-                        const optimalDistance = Math.max(size.x, size.y, size.z) * 2.5;
-                        camera.position.set(0, size.y * 0.5, optimalDistance);
-                        camera.lookAt(new THREE.Vector3(0, 0, 0));
-                        controls.target.set(0, 0, 0);
+                        // Auto-center camera on model
+                        const box = new THREE.Box3().setFromObject(model);
+                        const center = new THREE.Vector3();
+                        const size = new THREE.Vector3();
+                        box.getCenter(center);
+                        box.getSize(size);
+                        console.log("📐 Bounding Box Center:", center);
+                        console.log("📏 Size:", size);
+
+                        controls.target.copy(center);
+                        camera.position.copy(center.clone().add(new THREE.Vector3(0, 0, size.z * 2.5)));
+                        camera.lookAt(center);
                         controls.update();
+
+                        console.log("✅ Model Loaded");
                     },
                     undefined,
-                    (error) => console.error("❌ Error loading GLB file:", error)
+                    (err) => console.error("❌ Error loading model", err)
                 );
 
-                // **Animation Loop**
                 const animate = () => {
                     animationRef.current = requestAnimationFrame(animate);
                     if (objectRef.current) {
@@ -131,8 +137,8 @@ export default function ThreeDModel({
                     renderer.render(scene, camera);
                 };
                 animate();
-            } catch (error) {
-                console.error("❌ Failed to initialize Three.js scene:", error);
+            } catch (e) {
+                console.error("❌ Failed to initialize Three.js scene:", e);
             }
         };
 
@@ -140,23 +146,20 @@ export default function ThreeDModel({
 
         return () => {
             cancelAnimationFrame(animationRef.current);
-            if (mountRef.current) {
+            if (mountRef.current?.firstChild) {
                 mountRef.current.removeChild(mountRef.current.firstChild);
             }
         };
     }, [glbUrl, cameraX, cameraY, cameraZ, modelX, modelY, modelZ, modelScale, rotationSpeed, rotationDirection]);
 
-    return (
-        <div ref={mountRef} style={{ width: "100%", height: "100%", overflow: "visible" }} />
-    );
+    return <div ref={mountRef} style={{ width: "100%", height: "100%", overflow: "visible" }} />;
 }
 
-// **Property Controls for Framer UI**
 addPropertyControls(ThreeDModel, {
     glbUrl: { type: ControlType.String, title: "GLB URL" },
     cameraX: { type: ControlType.Number, title: "Camera X", defaultValue: 0 },
     cameraY: { type: ControlType.Number, title: "Camera Y", defaultValue: 0 },
-    cameraZ: { type: ControlType.Number, title: "Camera Z", defaultValue: 0 },
+    cameraZ: { type: ControlType.Number, title: "Camera Z", defaultValue: 10 },
     modelX: { type: ControlType.Number, title: "Model X", defaultValue: 0 },
     modelY: { type: ControlType.Number, title: "Model Y", defaultValue: 0 },
     modelZ: { type: ControlType.Number, title: "Model Z", defaultValue: 0 },
@@ -172,11 +175,9 @@ addPropertyControls(ThreeDModel, {
 
 
 // **📝 Notes:**
-// 3/16 stable
-// 3/16 issues:
-//    pointerUp but model still follows mouse
-//    scroll passthrough on touch
-//    responsive web: model position
-//        models do not stay center in scale down to mobile
-//        out of view in scale up to widescreen desktop
-//    color slightly washed out
+// 3/21 new stable: shared unframer project on github with chat and it noticably adapted to match my problem solving effort
+// issues: (1) remove the background,
+// (2) fix lighting,
+// (3) reduce interactions to soft horizontal orbit,
+// (4) fix mouseUp orbiting,
+// (5) create consistent model scale and position
