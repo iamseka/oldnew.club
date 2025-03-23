@@ -6,8 +6,12 @@ const ThreeJSURL = "https://unpkg.com/three@0.136.0/build/three.min.js";
 const GLTFLoaderURL = "https://unpkg.com/three@0.136.0/examples/js/loaders/GLTFLoader.js";
 const OrbitControlsURL = "https://unpkg.com/three@0.136.0/examples/js/controls/OrbitControls.js";
 
+// Script cache to prevent duplicate loading
+const scriptCache = new Map();
+
 const loadScript = (url) => {
-    return new Promise((resolve, reject) => {
+    if (scriptCache.has(url)) return scriptCache.get(url);
+    const promise = new Promise((resolve, reject) => {
         const script = document.createElement("script");
         script.src = url;
         script.async = true;
@@ -15,6 +19,8 @@ const loadScript = (url) => {
         script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
         document.head.appendChild(script);
     });
+    scriptCache.set(url, promise);
+    return promise;
 };
 
 export default function ThreeDModel({
@@ -28,11 +34,16 @@ export default function ThreeDModel({
     modelScale = 2,
     rotationSpeed = 0.01,
     rotationDirection = 1,
+    ambientLightIntensity = 1,
+    directionalLightIntensity = 1,
 }) {
     const mountRef = useRef(null);
     const objectRef = useRef(null);
     const animationRef = useRef(null);
     const controlsRef = useRef(null);
+    const userInteracting = useRef(false);
+    const lastInteractionTime = useRef(Date.now());
+    const mouseDownRef = useRef(false);
 
     useEffect(() => {
         if (!mountRef.current || !glbUrl) {
@@ -65,7 +76,7 @@ export default function ThreeDModel({
                 console.log("✅ GLTFLoader and OrbitControls loaded");
 
                 const scene = new THREE.Scene();
-                scene.background = new THREE.Color(0xeeeeee); // Light gray background
+                scene.background = null;
 
                 const camera = new THREE.PerspectiveCamera(
                     50,
@@ -82,15 +93,42 @@ export default function ThreeDModel({
 
                 const controls = new THREE.OrbitControls(camera, renderer.domElement);
                 controls.enableDamping = true;
+                controls.enableZoom = false;
+                controls.enablePan = false;
+                controls.minPolarAngle = Math.PI / 2;
+                controls.maxPolarAngle = Math.PI / 2;
                 controlsRef.current = controls;
 
-                scene.add(new THREE.AmbientLight(0xffffff, 0.5));
-                const dirLight = new THREE.DirectionalLight(0xffffff, 0.5);
-                dirLight.position.set(5, 10, 5);
-                scene.add(dirLight);
+                controls.addEventListener("start", () => {
+                    userInteracting.current = true;
+                    mouseDownRef.current = true;
+                });
 
-                const axesHelper = new THREE.AxesHelper(5);
-                scene.add(axesHelper);
+                window.addEventListener("mouseup", () => {
+                    if (mouseDownRef.current) {
+                        userInteracting.current = false;
+                        lastInteractionTime.current = Date.now();
+                        mouseDownRef.current = false;
+                    }
+                });
+
+                // Lights
+                const lightGroup = new THREE.Group();
+
+                const ambientLight = new THREE.AmbientLight(0xffffff, ambientLightIntensity);
+                lightGroup.add(ambientLight);
+
+                const dirLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity);
+                dirLight.position.set(5, 10, 5);
+                dirLight.target.position.set(0, 0, 0);
+                lightGroup.add(dirLight);
+                lightGroup.add(dirLight.target);
+
+                const fillLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity * 0.3);
+                fillLight.position.set(-5, -5, -5);
+                lightGroup.add(fillLight);
+
+                scene.add(lightGroup);
 
                 const loader = new THREE.GLTFLoader();
                 loader.load(
@@ -98,28 +136,17 @@ export default function ThreeDModel({
                     (gltf) => {
                         const model = gltf.scene;
                         console.log("📦 Loaded Model Details:", model);
-                        console.log("🧱 Children:", model.children);
-                        model.traverse((child) => {
-                            console.log("🔎 Traversed Node:", child.name, child.type, child);
-                        });
+                        model.traverse((child) => console.log("🔎 Traversed Node:", child));
 
+                        model.scale.setScalar(modelScale);
                         model.position.set(modelX, modelY, modelZ);
-                        model.scale.set(modelScale, modelScale, modelScale);
+
                         scene.add(model);
                         objectRef.current = model;
 
-                        // Auto-center camera on model
-                        const box = new THREE.Box3().setFromObject(model);
-                        const center = new THREE.Vector3();
-                        const size = new THREE.Vector3();
-                        box.getCenter(center);
-                        box.getSize(size);
-                        console.log("📐 Bounding Box Center:", center);
-                        console.log("📏 Size:", size);
-
-                        controls.target.copy(center);
-                        camera.position.copy(center.clone().add(new THREE.Vector3(0, 0, size.z * 2.5)));
-                        camera.lookAt(center);
+                        controls.target.copy(new THREE.Vector3(0, 0, 0));
+                        camera.position.set(0, 0, 5);
+                        camera.lookAt(controls.target);
                         controls.update();
 
                         console.log("✅ Model Loaded");
@@ -130,9 +157,15 @@ export default function ThreeDModel({
 
                 const animate = () => {
                     animationRef.current = requestAnimationFrame(animate);
-                    if (objectRef.current) {
-                        objectRef.current.rotation.y += rotationSpeed * rotationDirection;
+
+                    if (objectRef.current && rotationDirection !== 0) {
+                        const elapsed = (Date.now() - lastInteractionTime.current) / 1000;
+                        const easeFactor = Math.min(elapsed / 0.8, 1);
+                        if (!userInteracting.current) {
+                            objectRef.current.rotation.y += rotationSpeed * easeFactor * rotationDirection;
+                        }
                     }
+
                     controls.update();
                     renderer.render(scene, camera);
                 };
@@ -150,7 +183,7 @@ export default function ThreeDModel({
                 mountRef.current.removeChild(mountRef.current.firstChild);
             }
         };
-    }, [glbUrl, cameraX, cameraY, cameraZ, modelX, modelY, modelZ, modelScale, rotationSpeed, rotationDirection]);
+    }, [glbUrl, cameraX, cameraY, cameraZ, modelX, modelY, modelZ, modelScale, rotationSpeed, rotationDirection, ambientLightIntensity, directionalLightIntensity]);
 
     return <div ref={mountRef} style={{ width: "100%", height: "100%", overflow: "visible" }} />;
 }
@@ -169,15 +202,24 @@ addPropertyControls(ThreeDModel, {
         type: ControlType.Enum,
         title: "Rotation Direction",
         options: [1, -1, 0],
-        optionTitles: ["CCW", "CW", "0"],
+        optionTitles: ["CCW", "CW", "None"],
+    },
+    ambientLightIntensity: {
+        type: ControlType.Number,
+        title: "Ambient Light",
+        defaultValue: 1,
+        min: 0,
+        max: 3,
+        step: 0.1,
+    },
+    directionalLightIntensity: {
+        type: ControlType.Number,
+        title: "Directional Light",
+        defaultValue: 1,
+        min: 0,
+        max: 3,
+        step: 0.1,
     },
 });
 
-
-// **📝 Notes:**
-// 3/21 new stable: shared unframer project on github with chat and it noticably adapted to match my problem solving effort
-// issues: (1) remove the background,
-// (2) fix lighting,
-// (3) reduce interactions to soft horizontal orbit,
-// (4) fix mouseUp orbiting,
-// (5) create consistent model scale and position
+// 3/23 status: stable, i think we're done for now.
