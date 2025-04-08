@@ -1,4 +1,4 @@
-// 4/8: mobile stable; desktop dragging no longer works. do we need it?
+// 4/8: desktop & mobile stable
 
 import React, { useEffect, useRef, useState } from "react";
 import { addPropertyControls, ControlType } from "framer";
@@ -47,11 +47,16 @@ export default function ThreeDModel({
     const rendererRef = useRef(null);
     const sceneRef = useRef(null);
     const cameraRef = useRef(null);
+    const controlsRef = useRef(null);
     const contextIdRef = useRef(null);
     const userInteracting = useRef(false);
     const lastInteractionTime = useRef(Date.now());
     const [isInViewport, setIsInViewport] = useState(true);
     const isMounted = useRef(true);
+    
+    // Rotation physics tracking
+    const rotationVelocity = useRef(0);
+    const targetRotationVelocity = useRef(rotationSpeed * rotationDirection);
     
     // Detect device
     const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
@@ -83,6 +88,11 @@ export default function ThreeDModel({
         if (animationRef.current) {
             cancelAnimationFrame(animationRef.current);
             animationRef.current = null;
+        }
+        
+        if (controlsRef.current) {
+            controlsRef.current.dispose();
+            controlsRef.current = null;
         }
         
         if (sceneRef.current && objectRef.current) {
@@ -188,7 +198,7 @@ export default function ThreeDModel({
                 renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
                 renderer.setPixelRatio(isMobile ? Math.min(1.5, window.devicePixelRatio) : window.devicePixelRatio);
                 
-                // CRITICAL: This transparent div trick allows touches to pass through for vertical scrolling
+                // Create container
                 const container = document.createElement('div');
                 container.style.width = '100%';
                 container.style.height = '100%';
@@ -200,7 +210,15 @@ export default function ThreeDModel({
                 renderer.domElement.style.left = '0';
                 renderer.domElement.style.width = '100%';
                 renderer.domElement.style.height = '100%';
-                renderer.domElement.style.pointerEvents = 'none'; // Start with no pointer events
+                
+                // Different handling for mobile vs desktop
+                if (isMobile) {
+                    // On mobile, default to no pointer events to allow scrolling
+                    renderer.domElement.style.pointerEvents = 'none';
+                } else {
+                    // On desktop, always enable pointer events for mouse interaction
+                    renderer.domElement.style.pointerEvents = 'auto';
+                }
                 
                 container.appendChild(renderer.domElement);
                 mountRef.current.appendChild(container);
@@ -214,92 +232,129 @@ export default function ThreeDModel({
                 fillLight.position.set(-5, -5, -5);
                 scene.add(ambientLight, dirLight, fillLight);
 
-                // Variables for touch handling
-                let touchStartX = 0;
-                let touchStartY = 0;
-                let isHorizontalMove = null;
-                let dragVelocity = 0;
+                // Initialize rotation velocity to match auto-rotation
+                rotationVelocity.current = rotationSpeed * rotationDirection;
+                targetRotationVelocity.current = rotationSpeed * rotationDirection;
+
+                // For desktop, use OrbitControls for mouse interaction
+                if (!isMobile) {
+                    const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                    controls.enableDamping = true;
+                    controls.dampingFactor = 0.05;
+                    controls.enableZoom = false;
+                    controls.enablePan = false;
+                    controls.minPolarAngle = Math.PI / 2; // Restrict to horizontal rotation
+                    controls.maxPolarAngle = Math.PI / 2; 
+                    controls.rotateSpeed = 0.7;
+                    
+                    controls.addEventListener('start', () => {
+                        userInteracting.current = true;
+                    });
+                    
+                    controls.addEventListener('end', () => {
+                        userInteracting.current = false;
+                        lastInteractionTime.current = Date.now();
+                    });
+                    
+                    controlsRef.current = controls;
+                }
                 
-                // Handle touch events
-                const handleTouchStart = (e) => {
-                    if (e.touches.length !== 1) return;
+                // For mobile, handle touch events manually with smooth physics
+                if (isMobile) {
+                    // Variables for touch handling
+                    let touchStartX = 0;
+                    let touchStartY = 0;
+                    let lastTouchX = 0;
+                    let lastTouchTime = 0;
+                    let isHorizontalMove = null;
                     
-                    touchStartX = e.touches[0].clientX;
-                    touchStartY = e.touches[0].clientY;
-                    isHorizontalMove = null;
-                    userInteracting.current = false;
-                };
-                
-                const handleTouchMove = (e) => {
-                    if (e.touches.length !== 1) return;
-                    
-                    const currentX = e.touches[0].clientX;
-                    const currentY = e.touches[0].clientY;
-                    const deltaX = Math.abs(currentX - touchStartX);
-                    const deltaY = Math.abs(currentY - touchStartY);
-                    
-                    // Determine direction if not already set
-                    if (isHorizontalMove === null && (deltaX > 8 || deltaY > 8)) {
-                        isHorizontalMove = deltaX > deltaY;
+                    // Handle touch events
+                    const handleTouchStart = (e) => {
+                        if (e.touches.length !== 1) return;
                         
-                        if (isHorizontalMove) {
-                            // Horizontal - enable rotation
-                            renderer.domElement.style.pointerEvents = 'auto';
+                        touchStartX = e.touches[0].clientX;
+                        touchStartY = e.touches[0].clientY;
+                        lastTouchX = touchStartX;
+                        lastTouchTime = Date.now();
+                        isHorizontalMove = null;
+                        userInteracting.current = false;
+                    };
+                    
+                    const handleTouchMove = (e) => {
+                        if (e.touches.length !== 1) return;
+                        
+                        const currentX = e.touches[0].clientX;
+                        const currentY = e.touches[0].clientY;
+                        const deltaX = Math.abs(currentX - touchStartX);
+                        const deltaY = Math.abs(currentY - touchStartY);
+                        
+                        // Determine direction if not already set
+                        if (isHorizontalMove === null && (deltaX > 8 || deltaY > 8)) {
+                            isHorizontalMove = deltaX > deltaY;
+                            
+                            if (isHorizontalMove) {
+                                // Horizontal - enable rotation
+                                renderer.domElement.style.pointerEvents = 'auto';
+                                
+                                if (e.cancelable) {
+                                    e.preventDefault();
+                                }
+                                
+                                userInteracting.current = true;
+                            } else {
+                                // Vertical - disable pointer events to allow page scrolling
+                                renderer.domElement.style.pointerEvents = 'none';
+                                userInteracting.current = false;
+                            }
+                        }
+                        
+                        // Handle horizontal rotation
+                        if (isHorizontalMove === true) {
+                            userInteracting.current = true;
+                            lastInteractionTime.current = Date.now();
                             
                             if (e.cancelable) {
                                 e.preventDefault();
                             }
                             
-                            userInteracting.current = true;
-                        } else {
-                            // Vertical - disable pointer events to allow page scrolling
-                            renderer.domElement.style.pointerEvents = 'none';
-                            userInteracting.current = false;
+                            // Calculate touch movement speed for physics
+                            const now = Date.now();
+                            const dt = Math.max(1, now - lastTouchTime); // Avoid division by zero
+                            
+                            // Rotate the model and calculate velocity
+                            if (objectRef.current) {
+                                const moveAmount = currentX - lastTouchX;
+                                const rotateAmount = moveAmount * 0.01;
+                                objectRef.current.rotation.y += rotateAmount;
+                                
+                                // Calculate velocity in radians per millisecond, then convert to per-frame rate
+                                // This is crucial for smooth transitions
+                                rotationVelocity.current = (rotateAmount / dt) * 16.67; // Approximately 60fps
+                            }
+                            
+                            lastTouchX = currentX;
+                            lastTouchTime = now;
                         }
-                    }
+                    };
                     
-                    // Handle horizontal rotation
-                    if (isHorizontalMove === true) {
-                        userInteracting.current = true;
+                    const handleTouchEnd = () => {
+                        // Reset pointer events to none to allow scrolling by default
+                        renderer.domElement.style.pointerEvents = 'none';
+                        
+                        userInteracting.current = false;
                         lastInteractionTime.current = Date.now();
-                        
-                        if (e.cancelable) {
-                            e.preventDefault();
-                        }
-                        
-                        // Rotate the model
-                        if (objectRef.current) {
-                            const rotateAmount = (currentX - touchStartX) * 0.01;
-                            objectRef.current.rotation.y += rotateAmount;
-                            dragVelocity = rotateAmount;
-                            touchStartX = currentX;
-                        }
-                    }
-                };
-                
-                const handleTouchEnd = () => {
-                    // Reset pointer events to none to allow scrolling by default
-                    renderer.domElement.style.pointerEvents = 'none';
+                    };
                     
-                    userInteracting.current = false;
-                    lastInteractionTime.current = Date.now();
+                    // Add touch event listeners to container
+                    container.addEventListener("touchstart", handleTouchStart, { passive: true });
+                    container.addEventListener("touchmove", handleTouchMove, { passive: false });
+                    container.addEventListener("touchend", handleTouchEnd, { passive: true });
                     
-                    // Add very slight momentum (much less than before)
-                    if (isHorizontalMove === true) {
-                        // Apply a small amount of momentum that quickly fades
-                        dragVelocity = dragVelocity * 0.5; // Reduce velocity significantly
-                    }
-                };
-                
-                // Add touch event listeners to container
-                container.addEventListener("touchstart", handleTouchStart, { passive: true });
-                container.addEventListener("touchmove", handleTouchMove, { passive: false });
-                container.addEventListener("touchend", handleTouchEnd, { passive: true });
-                
-                // Enable pointer events temporarily when touching container
-                container.addEventListener("pointerdown", () => {
-                    renderer.domElement.style.pointerEvents = 'auto';
-                }, { passive: true });
+                    // Enable pointer events temporarily when touching container
+                    container.addEventListener("pointerdown", () => {
+                        if (isMobile) renderer.domElement.style.pointerEvents = 'auto';
+                    }, { passive: true });
+                }
 
                 // Load model
                 const loader = new THREE.GLTFLoader();
@@ -340,8 +395,9 @@ export default function ThreeDModel({
                     (err) => console.error("Error loading model:", err)
                 );
 
-                // Animation loop
+                // Animation loop with smooth physics
                 let lastTime = 0;
+                
                 const animate = (time) => {
                     if (!isMounted.current) return;
                     
@@ -351,22 +407,27 @@ export default function ThreeDModel({
                     lastTime = time;
                     
                     if (isInViewport && objectRef.current) {
+                        // Update controls for desktop
+                        if (!isMobile && controlsRef.current) {
+                            controlsRef.current.update();
+                        }
+                        
+                        // Handle rotation physics for both desktop and mobile
                         if (!userInteracting.current) {
-                            // Apply very brief momentum then quickly return to auto-rotation
-                            if (Math.abs(dragVelocity) > 0.0001) {
-                                objectRef.current.rotation.y += dragVelocity;
-                                dragVelocity *= 0.9; // Decay quickly
-                            } else {
-                                // Auto-rotation with quick return after interaction
-                                const elapsed = (Date.now() - lastInteractionTime.current) / 1000;
-                                const targetSpeed = rotationSpeed * rotationDirection;
+                            const elapsed = (Date.now() - lastInteractionTime.current) / 1000;
+                            
+                            if (elapsed > 0.1) {
+                                // Smooth damping transition to target velocity (similar to OrbitControls)
+                                const dampingFactor = 0.92; // Adjust for more/less smoothness
+                                const targetVelocity = rotationSpeed * rotationDirection;
                                 
-                                // Start transitioning back to auto-rotation quickly
-                                if (elapsed > 0.2) {
-                                    // Fast transition back to auto-rotation 
-                                    objectRef.current.rotation.y += targetSpeed;
-                                }
+                                // Use damping to smoothly transition between current velocity and target
+                                rotationVelocity.current = rotationVelocity.current * dampingFactor + 
+                                                       targetVelocity * (1 - dampingFactor);
                             }
+                            
+                            // Apply the current rotation velocity
+                            objectRef.current.rotation.y += rotationVelocity.current;
                         }
                         
                         renderer.render(scene, camera);
@@ -388,12 +449,14 @@ export default function ThreeDModel({
 
                 // Cleanup
                 return () => {
-                    container.removeEventListener("touchstart", handleTouchStart);
-                    container.removeEventListener("touchmove", handleTouchMove);
-                    container.removeEventListener("touchend", handleTouchEnd);
-                    container.removeEventListener("pointerdown", () => {
-                        renderer.domElement.style.pointerEvents = 'auto';
-                    });
+                    if (isMobile) {
+                        container.removeEventListener("touchstart", handleTouchStart);
+                        container.removeEventListener("touchmove", handleTouchMove);
+                        container.removeEventListener("touchend", handleTouchEnd);
+                        container.removeEventListener("pointerdown", () => {
+                            renderer.domElement.style.pointerEvents = 'auto';
+                        });
+                    }
                     
                     window.removeEventListener('resize', handleResize);
                     
