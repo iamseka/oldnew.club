@@ -1,31 +1,7 @@
-// 4/8: desktop & mobile stable
+// 4/12: desktop & mobile stable
 
 import React, { useEffect, useRef, useState } from "react";
 import { addPropertyControls, ControlType } from "framer";
-
-const ThreeJSURL = "https://unpkg.com/three@0.136.0/build/three.min.js";
-const GLTFLoaderURL = "https://unpkg.com/three@0.136.0/examples/js/loaders/GLTFLoader.js";
-const OrbitControlsURL = "https://unpkg.com/three@0.136.0/examples/js/controls/OrbitControls.js";
-
-// Shared WebGL context management
-const MAX_WEBGL_CONTEXTS = 4;
-const activeContexts = new Set();
-
-// Global script loading
-const scriptCache = new Map();
-const loadScript = (url) => {
-    if (scriptCache.has(url)) return scriptCache.get(url);
-    const promise = new Promise((resolve, reject) => {
-        const script = document.createElement("script");
-        script.src = url;
-        script.async = true;
-        script.onload = () => resolve(true);
-        script.onerror = () => reject(new Error(`Failed to load script: ${url}`));
-        document.head.appendChild(script);
-    });
-    scriptCache.set(url, promise);
-    return promise;
-};
 
 export default function ThreeDModel({
     glbUrl,
@@ -40,66 +16,192 @@ export default function ThreeDModel({
     rotationDirection = 1,
     ambientLightIntensity = 1,
     directionalLightIntensity = 1,
+    mobileQuality = "medium" // Can be "low", "medium", or "high"
 }) {
     const mountRef = useRef(null);
-    const objectRef = useRef(null);
-    const animationRef = useRef(null);
-    const rendererRef = useRef(null);
-    const sceneRef = useRef(null);
-    const cameraRef = useRef(null);
-    const controlsRef = useRef(null);
-    const contextIdRef = useRef(null);
-    const userInteracting = useRef(false);
-    const lastInteractionTime = useRef(Date.now());
-    const [isInViewport, setIsInViewport] = useState(true);
-    const isMounted = useRef(true);
+    const [isInitialized, setIsInitialized] = useState(false);
+    const [isModelLoaded, setIsModelLoaded] = useState(false);
+    const [isInViewport, setIsInViewport] = useState(false);
+    const [hasError, setHasError] = useState(false);
     
-    // Rotation physics tracking
-    const rotationVelocity = useRef(0);
-    const targetRotationVelocity = useRef(rotationSpeed * rotationDirection);
+    // References for cleanup
+    const stateRef = useRef({
+        isMounted: false,
+        renderer: null,
+        scene: null,
+        camera: null,
+        controls: null,
+        model: null,
+        animationFrame: null,
+        isUserInteracting: false,
+        lastInteractionTime: Date.now(),
+        rotationVelocity: 0,
+        eventListeners: []
+    });
+    
+    // Safari reset - this is crucial for iOS Safari
+    useEffect(() => {
+        // Create a session ID that changes each time the page loads
+        // This helps Safari recognize this is a new session
+        if (typeof window !== 'undefined' && !window._glbViewerSessionId) {
+            window._glbViewerSessionId = Date.now();
+            
+            // Force context loss on page unload to help Safari cleanup resources
+            window.addEventListener('beforeunload', () => {
+                if (stateRef.current.renderer) {
+                    stateRef.current.renderer.forceContextLoss();
+                    stateRef.current.renderer.dispose();
+                }
+            });
+        }
+    }, []);
     
     // Detect device
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
-    const isMobile = /Mobi|Android/i.test(navigator.userAgent) || isIOS;
+    const isMobile = typeof navigator !== 'undefined' && 
+                    (/Mobi|Android|iPhone|iPad|iPod/i.test(navigator.userAgent));
+    const isIOS = typeof navigator !== 'undefined' && 
+                (/iPhone|iPad|iPod/i.test(navigator.userAgent) && !window.MSStream);
     
-    // Context management functions
-    const registerContext = () => {
-        const id = Date.now().toString();
-        activeContexts.add(id);
-        contextIdRef.current = id;
-        return id;
-    };
-    
-    const unregisterContext = () => {
-        if (contextIdRef.current) {
-            activeContexts.delete(contextIdRef.current);
-            contextIdRef.current = null;
+    // Get quality settings based on device and preference
+    const getQualitySettings = () => {
+        // Base values - adjust these for each quality level
+        const settings = {
+            pixelRatio: isMobile ? 1 : window.devicePixelRatio,
+            antialias: !isMobile,
+            precision: isMobile ? "mediump" : "highp",
+            powerPreference: "default"
+        };
+        
+        if (isMobile) {
+            if (mobileQuality === "low") {
+                settings.pixelRatio = Math.min(1.0, window.devicePixelRatio);
+                settings.precision = "lowp";
+            } else if (mobileQuality === "medium") {
+                settings.pixelRatio = Math.min(1.5, window.devicePixelRatio);
+                settings.precision = "mediump";
+            } else { // "high"
+                settings.pixelRatio = Math.min(2.0, window.devicePixelRatio);
+                settings.precision = "mediump";
+                settings.antialias = true;
+            }
         }
+        
+        // Special settings for iOS
+        if (isIOS) {
+            settings.powerPreference = "low-power";
+            settings.antialias = false;
+            settings.precision = mobileQuality === "low" ? "lowp" : "mediump";
+            settings.pixelRatio = mobileQuality === "low" ? 1.0 : 
+                                 (mobileQuality === "medium" ? 1.2 : 1.5);
+        }
+        
+        return settings;
     };
     
-    const canCreateContext = () => {
-        return activeContexts.size < MAX_WEBGL_CONTEXTS;
-    };
+    // Intersection Observer setup
+    useEffect(() => {
+        const observer = new IntersectionObserver(
+            (entries) => {
+                const isVisible = entries[0].isIntersecting;
+                setIsInViewport(isVisible);
+                
+                // Reset error state when coming into view
+                if (isVisible && hasError) {
+                    setHasError(false);
+                }
+                
+                // Initialize only when in viewport
+                if (isVisible && !isInitialized && !hasError) {
+                    // Slightly delay initialization to help with iOS Safari
+                    setTimeout(() => {
+                        setIsInitialized(true);
+                    }, 100);
+                }
+            },
+            { threshold: 0.1, rootMargin: "50px" }
+        );
 
-    // Resource cleanup
-    const cleanup = () => {
-        isMounted.current = false;
-        
-        if (animationRef.current) {
-            cancelAnimationFrame(animationRef.current);
-            animationRef.current = null;
+        if (mountRef.current) {
+            observer.observe(mountRef.current);
         }
         
-        if (controlsRef.current) {
-            controlsRef.current.dispose();
-            controlsRef.current = null;
+        return () => {
+            if (mountRef.current) {
+                observer.unobserve(mountRef.current);
+            }
+        };
+    }, [isInitialized, hasError]);
+
+    // Load scripts utility
+    const loadScript = (url) => {
+        return new Promise((resolve, reject) => {
+            // Check if script is already loaded
+            if (document.querySelector(`script[src="${url}"]`)) {
+                resolve();
+                return;
+            }
+            
+            const script = document.createElement('script');
+            script.src = url;
+            script.async = true;
+            script.onload = () => resolve();
+            script.onerror = () => reject(new Error(`Failed to load ${url}`));
+            document.head.appendChild(script);
+        });
+    };
+    
+    // Load Three.js and dependencies
+    const loadThree = async () => {
+        try {
+            await Promise.all([
+                loadScript("https://unpkg.com/three@0.136.0/build/three.min.js"),
+                loadScript("https://unpkg.com/three@0.136.0/examples/js/loaders/GLTFLoader.js"),
+                loadScript("https://unpkg.com/three@0.136.0/examples/js/controls/OrbitControls.js")
+            ]);
+            
+            // Connect modules if needed
+            if (window.THREE && window.GLTFLoader && !window.THREE.GLTFLoader) {
+                window.THREE.GLTFLoader = window.GLTFLoader;
+            }
+            
+            if (window.THREE && window.OrbitControls && !window.THREE.OrbitControls) {
+                window.THREE.OrbitControls = window.OrbitControls;
+            }
+            
+            return window.THREE;
+        } catch (err) {
+            console.error("Failed to load Three.js:", err);
+            setHasError(true);
+            throw err;
+        }
+    };
+    
+    // Clean up all resources to prevent memory leaks
+    const performCleanup = () => {
+        const state = stateRef.current;
+        
+        // Cancel animation frame
+        if (state.animationFrame) {
+            cancelAnimationFrame(state.animationFrame);
+            state.animationFrame = null;
         }
         
-        if (sceneRef.current && objectRef.current) {
-            sceneRef.current.remove(objectRef.current);
-            objectRef.current.traverse((node) => {
+        // Remove event listeners
+        state.eventListeners.forEach(({ target, event, handler, options }) => {
+            if (target) {
+                target.removeEventListener(event, handler, options);
+            }
+        });
+        state.eventListeners = [];
+        
+        // Dispose of Three.js objects
+        if (state.model) {
+            if (state.scene) state.scene.remove(state.model);
+            
+            state.model.traverse((node) => {
                 if (node.isMesh) {
                     if (node.geometry) node.geometry.dispose();
+                    
                     if (node.material) {
                         if (Array.isArray(node.material)) {
                             node.material.forEach(mat => {
@@ -113,97 +215,109 @@ export default function ThreeDModel({
                     }
                 }
             });
-            objectRef.current = null;
+            
+            state.model = null;
         }
         
-        if (rendererRef.current) {
-            rendererRef.current.dispose();
-            rendererRef.current.forceContextLoss();
-            rendererRef.current = null;
+        // Dispose controls
+        if (state.controls) {
+            state.controls.dispose();
+            state.controls = null;
         }
         
-        unregisterContext();
-        sceneRef.current = null;
-        cameraRef.current = null;
+        // Dispose renderer - this is critical for Safari
+        if (state.renderer) {
+            state.renderer.dispose();
+            state.renderer.forceContextLoss();
+            
+            // Remove from DOM
+            const canvas = state.renderer.domElement;
+            if (canvas && canvas.parentNode) {
+                canvas.parentNode.removeChild(canvas);
+            }
+            
+            state.renderer = null;
+        }
+        
+        // Clear scene
+        if (state.scene) {
+            while(state.scene.children.length > 0) { 
+                const object = state.scene.children[0];
+                state.scene.remove(object);
+            }
+            state.scene = null;
+        }
+        
+        state.camera = null;
     };
 
-    // Set up intersection observer
+    // Initialize Three.js scene when component becomes visible
     useEffect(() => {
-        const observer = new IntersectionObserver(
-            (entries) => {
-                setIsInViewport(entries[0].isIntersecting);
-            },
-            { threshold: 0.1 }
-        );
-
-        if (mountRef.current) observer.observe(mountRef.current);
-        return () => {
-            if (mountRef.current) observer.unobserve(mountRef.current);
-        };
-    }, []);
-
-    // Main initialization
-    useEffect(() => {
-        if (!mountRef.current || !glbUrl) return;
-        isMounted.current = true;
+        if (!isInitialized || !isInViewport || !glbUrl || hasError) return;
         
-        if (!canCreateContext()) return;
-        registerContext();
-
-        // Clear container
-        while (mountRef.current.firstChild) {
-            mountRef.current.removeChild(mountRef.current.firstChild);
+        stateRef.current.isMounted = true;
+        const state = stateRef.current;
+        
+        // Clear container first
+        if (mountRef.current) {
+            while (mountRef.current.firstChild) {
+                mountRef.current.removeChild(mountRef.current.firstChild);
+            }
         }
 
-        const loadModules = async () => {
+        // Helper to add event listeners that get automatically cleaned up
+        const addEventListenerWithCleanup = (target, event, handler, options) => {
+            if (!target) return;
+            
+            target.addEventListener(event, handler, options);
+            state.eventListeners.push({ target, event, handler, options });
+        };
+        
+        // Initialize Three.js scene
+        const initScene = async () => {
             try {
-                await Promise.all([
-                    loadScript(ThreeJSURL),
-                    loadScript(GLTFLoaderURL),
-                    loadScript(OrbitControlsURL),
-                ]);
-
-                if (!isMounted.current) return;
-
-                const THREE = window.THREE;
-                const OrbitControls = window.THREE.OrbitControls || window.OrbitControls;
-                const GLTFLoader = window.THREE.GLTFLoader || window.GLTFLoader;
+                const THREE = await loadThree();
+                if (!state.isMounted) return;
                 
-                if (!THREE || !OrbitControls || !GLTFLoader) return;
-                
-                if (!THREE.OrbitControls) THREE.OrbitControls = OrbitControls;
-                if (!THREE.GLTFLoader) THREE.GLTFLoader = GLTFLoader;
-
-                // Create scene
-                const scene = new THREE.Scene();
-                scene.background = null;
-                sceneRef.current = scene;
-
-                // Setup camera
-                const camera = new THREE.PerspectiveCamera(
-                    50, 
-                    mountRef.current.clientWidth / mountRef.current.clientHeight, 
-                    0.1, 
-                    1000
-                );
-                camera.position.set(0, 0, 5);
-                cameraRef.current = camera;
-
-                // Create renderer
-                const renderer = new THREE.WebGLRenderer({ 
-                    alpha: true, 
-                    antialias: !isMobile,
-                    precision: isMobile ? "mediump" : "highp"
-                });
-                renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
-                renderer.setPixelRatio(isMobile ? Math.min(1.5, window.devicePixelRatio) : window.devicePixelRatio);
-                
-                // Create container
+                // Create container element
                 const container = document.createElement('div');
                 container.style.width = '100%';
                 container.style.height = '100%';
                 container.style.position = 'relative';
                 container.style.touchAction = 'pan-y';
+                
+                if (!mountRef.current) return;
+                mountRef.current.appendChild(container);
+                
+                // Get quality settings
+                const quality = getQualitySettings();
+                
+                // Create scene
+                const scene = new THREE.Scene();
+                scene.background = null;
+                state.scene = scene;
+                
+                // Create camera
+                const camera = new THREE.PerspectiveCamera(
+                    50, 
+                    container.clientWidth / container.clientHeight, 
+                    0.1, 
+                    1000
+                );
+                camera.position.set(0, 0, 5);
+                state.camera = camera;
+                
+                // Create renderer with specific settings for platform
+                const renderer = new THREE.WebGLRenderer({ 
+                    alpha: true, 
+                    antialias: quality.antialias,
+                    precision: quality.precision,
+                    powerPreference: quality.powerPreference,
+                    preserveDrawingBuffer: false
+                });
+                
+                renderer.setSize(container.clientWidth, container.clientHeight);
+                renderer.setPixelRatio(quality.pixelRatio);
                 
                 renderer.domElement.style.position = 'absolute';
                 renderer.domElement.style.top = '0';
@@ -211,73 +325,23 @@ export default function ThreeDModel({
                 renderer.domElement.style.width = '100%';
                 renderer.domElement.style.height = '100%';
                 
-                // Different handling for mobile vs desktop
+                // Touch handling setup
                 if (isMobile) {
-                    // On mobile, default to no pointer events to allow scrolling
                     renderer.domElement.style.pointerEvents = 'none';
-                } else {
-                    // On desktop, always enable pointer events for mouse interaction
-                    renderer.domElement.style.pointerEvents = 'auto';
-                }
-                
-                container.appendChild(renderer.domElement);
-                mountRef.current.appendChild(container);
-                rendererRef.current = renderer;
-
-                // Add lighting
-                const ambientLight = new THREE.AmbientLight(0xffffff, ambientLightIntensity);
-                const dirLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity);
-                dirLight.position.set(5, 10, 5);
-                const fillLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity * 0.3);
-                fillLight.position.set(-5, -5, -5);
-                scene.add(ambientLight, dirLight, fillLight);
-
-                // Initialize rotation velocity to match auto-rotation
-                rotationVelocity.current = rotationSpeed * rotationDirection;
-                targetRotationVelocity.current = rotationSpeed * rotationDirection;
-
-                // For desktop, use OrbitControls for mouse interaction
-                if (!isMobile) {
-                    const controls = new THREE.OrbitControls(camera, renderer.domElement);
-                    controls.enableDamping = true;
-                    controls.dampingFactor = 0.05;
-                    controls.enableZoom = false;
-                    controls.enablePan = false;
-                    controls.minPolarAngle = Math.PI / 2; // Restrict to horizontal rotation
-                    controls.maxPolarAngle = Math.PI / 2; 
-                    controls.rotateSpeed = 0.7;
                     
-                    controls.addEventListener('start', () => {
-                        userInteracting.current = true;
-                    });
-                    
-                    controls.addEventListener('end', () => {
-                        userInteracting.current = false;
-                        lastInteractionTime.current = Date.now();
-                    });
-                    
-                    controlsRef.current = controls;
-                }
-                
-                // For mobile, handle touch events manually with smooth physics
-                if (isMobile) {
-                    // Variables for touch handling
                     let touchStartX = 0;
                     let touchStartY = 0;
                     let lastTouchX = 0;
-                    let lastTouchTime = 0;
                     let isHorizontalMove = null;
                     
-                    // Handle touch events
                     const handleTouchStart = (e) => {
                         if (e.touches.length !== 1) return;
                         
                         touchStartX = e.touches[0].clientX;
                         touchStartY = e.touches[0].clientY;
                         lastTouchX = touchStartX;
-                        lastTouchTime = Date.now();
                         isHorizontalMove = null;
-                        userInteracting.current = false;
+                        state.isUserInteracting = false;
                     };
                     
                     const handleTouchMove = (e) => {
@@ -300,40 +364,29 @@ export default function ThreeDModel({
                                     e.preventDefault();
                                 }
                                 
-                                userInteracting.current = true;
+                                state.isUserInteracting = true;
                             } else {
                                 // Vertical - disable pointer events to allow page scrolling
                                 renderer.domElement.style.pointerEvents = 'none';
-                                userInteracting.current = false;
+                                state.isUserInteracting = false;
                             }
                         }
                         
                         // Handle horizontal rotation
-                        if (isHorizontalMove === true) {
-                            userInteracting.current = true;
-                            lastInteractionTime.current = Date.now();
+                        if (isHorizontalMove === true && state.model) {
+                            state.isUserInteracting = true;
+                            state.lastInteractionTime = Date.now();
                             
                             if (e.cancelable) {
                                 e.preventDefault();
                             }
                             
-                            // Calculate touch movement speed for physics
-                            const now = Date.now();
-                            const dt = Math.max(1, now - lastTouchTime); // Avoid division by zero
-                            
-                            // Rotate the model and calculate velocity
-                            if (objectRef.current) {
-                                const moveAmount = currentX - lastTouchX;
-                                const rotateAmount = moveAmount * 0.01;
-                                objectRef.current.rotation.y += rotateAmount;
-                                
-                                // Calculate velocity in radians per millisecond, then convert to per-frame rate
-                                // This is crucial for smooth transitions
-                                rotationVelocity.current = (rotateAmount / dt) * 16.67; // Approximately 60fps
-                            }
+                            // Rotate the model
+                            const rotateAmount = (currentX - lastTouchX) * 0.01;
+                            state.model.rotation.y += rotateAmount;
+                            state.rotationVelocity = rotateAmount * 10; // Store for momentum
                             
                             lastTouchX = currentX;
-                            lastTouchTime = now;
                         }
                     };
                     
@@ -341,137 +394,187 @@ export default function ThreeDModel({
                         // Reset pointer events to none to allow scrolling by default
                         renderer.domElement.style.pointerEvents = 'none';
                         
-                        userInteracting.current = false;
-                        lastInteractionTime.current = Date.now();
+                        state.isUserInteracting = false;
+                        state.lastInteractionTime = Date.now();
                     };
                     
-                    // Add touch event listeners to container
-                    container.addEventListener("touchstart", handleTouchStart, { passive: true });
-                    container.addEventListener("touchmove", handleTouchMove, { passive: false });
-                    container.addEventListener("touchend", handleTouchEnd, { passive: true });
-                    
-                    // Enable pointer events temporarily when touching container
-                    container.addEventListener("pointerdown", () => {
-                        if (isMobile) renderer.domElement.style.pointerEvents = 'auto';
-                    }, { passive: true });
+                    // Add touch event listeners
+                    addEventListenerWithCleanup(container, "touchstart", handleTouchStart, { passive: true });
+                    addEventListenerWithCleanup(container, "touchmove", handleTouchMove, { passive: false });
+                    addEventListenerWithCleanup(container, "touchend", handleTouchEnd, { passive: true });
+                } else {
+                    // Desktop controls with OrbitControls
+                    try {
+                        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+                        controls.enableDamping = true;
+                        controls.dampingFactor = 0.05;
+                        controls.enableZoom = false;
+                        controls.enablePan = false;
+                        controls.minPolarAngle = Math.PI / 2;
+                        controls.maxPolarAngle = Math.PI / 2;
+                        controls.rotateSpeed = 0.7;
+                        
+                        controls.addEventListener('start', () => { 
+                            state.isUserInteracting = true; 
+                        });
+                        
+                        controls.addEventListener('end', () => { 
+                            state.isUserInteracting = false; 
+                            state.lastInteractionTime = Date.now();
+                        });
+                        
+                        state.controls = controls;
+                    } catch (err) {
+                        console.warn("Could not initialize OrbitControls:", err);
+                    }
                 }
-
+                
+                container.appendChild(renderer.domElement);
+                state.renderer = renderer;
+                
+                // Add lighting
+                const ambientLight = new THREE.AmbientLight(0xffffff, ambientLightIntensity);
+                const dirLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity);
+                dirLight.position.set(5, 10, 5);
+                const fillLight = new THREE.DirectionalLight(0xffffff, directionalLightIntensity * 0.3);
+                fillLight.position.set(-5, -5, -5);
+                scene.add(ambientLight, dirLight, fillLight);
+                
+                // Set initial rotation velocity
+                state.rotationVelocity = rotationSpeed * rotationDirection;
+                
                 // Load model
-                const loader = new THREE.GLTFLoader();
-                loader.load(
-                    glbUrl,
-                    (gltf) => {
-                        if (!isMounted.current) return;
-                        
-                        const model = gltf.scene;
-                        
-                        // Simple mobile optimizations without changing appearance
-                        if (isMobile) {
-                            model.traverse((node) => {
-                                if (node.isMesh) {
-                                    node.castShadow = false;
-                                    node.receiveShadow = false;
-                                    if (node.material) {
-                                        if (Array.isArray(node.material)) {
-                                            node.material.forEach(mat => {
-                                                mat.precision = "mediump";
-                                            });
-                                        } else {
-                                            node.material.precision = "mediump";
+                try {
+                    const loader = new THREE.GLTFLoader();
+                    
+                    // Set a timeout for loading
+                    const loadTimeout = setTimeout(() => {
+                        if (!isModelLoaded && state.isMounted) {
+                            console.warn("Model loading timeout");
+                            setHasError(true);
+                        }
+                    }, 15000);
+                    
+                    loader.load(
+                        glbUrl,
+                        (gltf) => {
+                            clearTimeout(loadTimeout);
+                            if (!state.isMounted) return;
+                            
+                            const model = gltf.scene;
+                            
+                            // Apply optimizations for mobile
+                            if (isMobile) {
+                                model.traverse((node) => {
+                                    if (node.isMesh) {
+                                        node.castShadow = false;
+                                        node.receiveShadow = false;
+                                        
+                                        if (node.material) {
+                                            if (Array.isArray(node.material)) {
+                                                node.material.forEach(mat => {
+                                                    mat.precision = quality.precision;
+                                                    // Reduce texture quality on lowest setting
+                                                    if (quality.pixelRatio === 1 && mat.map) {
+                                                        mat.map.minFilter = THREE.LinearFilter;
+                                                        mat.map.anisotropy = 1;
+                                                    }
+                                                });
+                                            } else {
+                                                node.material.precision = quality.precision;
+                                                // Reduce texture quality on lowest setting
+                                                if (quality.pixelRatio === 1 && node.material.map) {
+                                                    node.material.map.minFilter = THREE.LinearFilter;
+                                                    node.material.map.anisotropy = 1;
+                                                }
+                                            }
                                         }
                                     }
-                                }
-                            });
-                        }
-                        
-                        model.scale.setScalar(modelScale);
-                        model.position.set(modelX, modelY, modelZ);
-                        scene.add(model);
-                        objectRef.current = model;
-                        
-                        camera.lookAt(new THREE.Vector3(0, 0, 0));
-                    },
-                    undefined,
-                    (err) => console.error("Error loading model:", err)
-                );
-
-                // Animation loop with smooth physics
-                let lastTime = 0;
-                
-                const animate = (time) => {
-                    if (!isMounted.current) return;
-                    
-                    animationRef.current = requestAnimationFrame(animate);
-                    
-                    const deltaTime = Math.min(0.05, (time - lastTime) / 1000);
-                    lastTime = time;
-                    
-                    if (isInViewport && objectRef.current) {
-                        // Update controls for desktop
-                        if (!isMobile && controlsRef.current) {
-                            controlsRef.current.update();
-                        }
-                        
-                        // Handle rotation physics for both desktop and mobile
-                        if (!userInteracting.current) {
-                            const elapsed = (Date.now() - lastInteractionTime.current) / 1000;
-                            
-                            if (elapsed > 0.1) {
-                                // Smooth damping transition to target velocity (similar to OrbitControls)
-                                const dampingFactor = 0.92; // Adjust for more/less smoothness
-                                const targetVelocity = rotationSpeed * rotationDirection;
-                                
-                                // Use damping to smoothly transition between current velocity and target
-                                rotationVelocity.current = rotationVelocity.current * dampingFactor + 
-                                                       targetVelocity * (1 - dampingFactor);
+                                });
                             }
                             
-                            // Apply the current rotation velocity
-                            objectRef.current.rotation.y += rotationVelocity.current;
+                            model.scale.setScalar(modelScale);
+                            model.position.set(modelX, modelY, modelZ);
+                            scene.add(model);
+                            state.model = model;
+                            
+                            camera.lookAt(new THREE.Vector3(0, 0, 0));
+                            setIsModelLoaded(true);
+                        },
+                        undefined,
+                        (err) => {
+                            clearTimeout(loadTimeout);
+                            console.error("Error loading model:", err);
+                            setHasError(true);
                         }
+                    );
+                } catch (err) {
+                    console.error("Error setting up model loader:", err);
+                    setHasError(true);
+                }
+                
+                // Animation loop
+                const animate = () => {
+                    if (!state.isMounted) return;
+                    
+                    state.animationFrame = requestAnimationFrame(animate);
+                    
+                    // Update controls if available
+                    if (state.controls) {
+                        state.controls.update();
+                    }
+                    
+                    // Handle model rotation
+                    if (state.model && !state.isUserInteracting) {
+                        const elapsed = (Date.now() - state.lastInteractionTime) / 1000;
                         
-                        renderer.render(scene, camera);
+                        if (elapsed > 0.1) {
+                            // Apply momentum with smooth transition to target rotation
+                            const dampingFactor = 0.95;
+                            const targetVelocity = rotationSpeed * rotationDirection;
+                            
+                            state.rotationVelocity = state.rotationVelocity * dampingFactor + 
+                                                targetVelocity * (1 - dampingFactor);
+                            
+                            state.model.rotation.y += state.rotationVelocity;
+                        }
+                    }
+                    
+                    // Render scene
+                    if (state.renderer && state.scene && state.camera) {
+                        state.renderer.render(state.scene, state.camera);
                     }
                 };
                 
-                animate(0);
-
+                animate();
+                
                 // Handle resize
                 const handleResize = () => {
-                    if (!mountRef.current || !camera || !renderer) return;
+                    if (!container || !state.camera || !state.renderer) return;
                     
-                    camera.aspect = mountRef.current.clientWidth / mountRef.current.clientHeight;
-                    camera.updateProjectionMatrix();
-                    renderer.setSize(mountRef.current.clientWidth, mountRef.current.clientHeight);
+                    state.camera.aspect = container.clientWidth / container.clientHeight;
+                    state.camera.updateProjectionMatrix();
+                    state.renderer.setSize(container.clientWidth, container.clientHeight);
                 };
                 
-                window.addEventListener('resize', handleResize);
-
-                // Cleanup
-                return () => {
-                    if (isMobile) {
-                        container.removeEventListener("touchstart", handleTouchStart);
-                        container.removeEventListener("touchmove", handleTouchMove);
-                        container.removeEventListener("touchend", handleTouchEnd);
-                        container.removeEventListener("pointerdown", () => {
-                            renderer.domElement.style.pointerEvents = 'auto';
-                        });
-                    }
-                    
-                    window.removeEventListener('resize', handleResize);
-                    
-                    cleanup();
-                };
-            } catch (e) {
-                console.error("Scene initialization failed:", e);
-                cleanup();
+                addEventListenerWithCleanup(window, 'resize', handleResize);
+                
+            } catch (err) {
+                console.error("Error initializing scene:", err);
+                setHasError(true);
             }
         };
-
-        loadModules();
-
-        return () => cleanup();
-    }, [glbUrl, modelX, modelY, modelZ, modelScale, rotationSpeed, rotationDirection, ambientLightIntensity, directionalLightIntensity]);
+        
+        initScene();
+        
+        // Cleanup when component unmounts or when dependencies change
+        return () => {
+            stateRef.current.isMounted = false;
+            performCleanup();
+        };
+    }, [isInitialized, isInViewport, glbUrl, hasError, mobileQuality, modelScale, 
+        modelX, modelY, modelZ, rotationSpeed, rotationDirection, 
+        ambientLightIntensity, directionalLightIntensity]);
 
     return (
         <div 
@@ -480,9 +583,33 @@ export default function ThreeDModel({
                 width: "100%", 
                 height: "100%", 
                 overflow: "visible",
-                touchAction: "pan-y" 
-            }} 
-        />
+                touchAction: "pan-y",
+                position: "relative"
+            }}
+        >
+            {hasError && (
+                <div 
+                    style={{
+                        width: '100%',
+                        height: '100%',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'rgba(0,0,0,0.03)',
+                        color: '#666',
+                        fontSize: '14px',
+                        fontFamily: 'sans-serif'
+                    }}
+                >
+                    <div style={{ textAlign: 'center' }}>
+                        <div>Model loading issue</div>
+                        <div style={{ marginTop: '8px', fontSize: '12px' }}>
+                            Try refreshing the page
+                        </div>
+                    </div>
+                </div>
+            )}
+        </div>
     );
 }
 
@@ -518,4 +645,11 @@ addPropertyControls(ThreeDModel, {
         max: 3,
         step: 0.1,
     },
+    mobileQuality: {
+        type: ControlType.Enum,
+        title: "Mobile Quality",
+        options: ["low", "medium", "high"],
+        optionTitles: ["Low", "Medium", "High"],
+        defaultValue: "medium"
+    }
 });
