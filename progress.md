@@ -1,10 +1,10 @@
 # Old New Club -- Progress
 
-> Last updated: 2026-03-03 (Session: Initial scaffold)
+> Last updated: 2026-03-18 (Session: Site review and GLB optimization)
 
 ## Current Status
 
-Scaffolded. No implementation yet. Tech stack decisions pending.
+Framer site is live and functional. GLB model files restored and optimized (63 MB down to 2.9 MB). Updated Framer code component with Draco decoder support. Tech stack decisions still pending for static site migration.
 
 ## Scope
 
@@ -37,6 +37,9 @@ Scaffolded. No implementation yet. Tech stack decisions pending.
 ## Decisions Made
 
 - 2026-03-03: Project scaffolded from blueprint. Four-module structure: site-engine, content-layer, media-pipeline, inquiry-handler. Content-driven architecture with markdown product files.
+- 2026-03-18: Prices are real ($150/$250), not inquiry-only. Updated product schema assumption.
+- 2026-03-18: Keep 3D model viewing (GLB) on the site. Optimized with Draco compression + WebP textures.
+- 2026-03-18: Migration priority: performance now, static site migration next, conversion/SEO later.
 
 ## Open Questions
 
@@ -44,5 +47,3 @@ Scaffolded. No implementation yet. Tech stack decisions pending.
 - Styling: Tailwind CSS or something else?
 - Hosting: Vercel, Netlify, or Cloudflare Pages?
 - Form handling: Formspree, Netlify Forms, or serverless function?
-- How to handle .glb 3D model files from existing repo? (Current Framer site uses GLB Model Viewer)
-- Should 3D model viewing carry over, or switch to optimized 2D imagery from Scaniverse?
