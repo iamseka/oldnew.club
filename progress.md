@@ -40,6 +40,7 @@ Framer site is live and functional. GLB model files restored and optimized (63 M
 - 2026-03-18: Prices are real ($150/$250), not inquiry-only. Updated product schema assumption.
 - 2026-03-18: Keep 3D model viewing (GLB) on the site. Optimized with Draco compression + WebP textures.
 - 2026-03-18: Migration priority: performance now, static site migration next, conversion/SEO later.
+- 2026-05-21: Adopted in-repo MEMORY.md as the single source of truth for session memory (harness audit Phase 2 propagation). Added rule to CLAUDE.md: NEVER write durable memory to `~/.claude/projects/.../memory/` because it does not sync across devices.
 
 ## Open Questions
 

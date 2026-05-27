@@ -8,6 +8,15 @@ Marketing website for Old New Club -- an upcycled fashion brand that hand-paints
 - **Tech stack**: TBD -- see docs/architecture.md for options under consideration
 - **Status**: Scaffolded -- not yet implemented
 
+## IMPORTANT: Memory Storage
+
+MEMORY.md in this repo is the single source of truth for session memory.
+
+NEVER write durable memory to `~/.claude/projects/.../memory/MEMORY.md` --
+that path is machine-local and does not sync across MacBook <-> Mac Mini.
+All session learnings, decisions, and status updates go in the in-repo
+MEMORY.md.
+
 ## Project Structure
 
 - `modules/` -- Core components. Each has a MODULE.md with purpose and interfaces
