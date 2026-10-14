@@ -4,7 +4,7 @@
 > Chronological detail lives in progress.md; durable architecture, state,
 > and decisions live here.
 
-## Current State (as of 2026-03-18)
+## Current State (as of 2026-10-13)
 
 - **Phase:** Scaffolded; tech stack decisions still pending for static
   site migration.
@@ -12,6 +12,11 @@
 - **3D assets:** GLB model files optimized 63 MB -> 2.9 MB via Draco
   compression + WebP textures. Framer code component updated with Draco
   decoder support.
+- **Viewer fix (2026-10-13):** `GLB Model Viewer` fixed for the cold-cache
+  load race and retry loop. Source of truth is the repo file; Framer runs a
+  pasted copy, so every change needs a paste + publish in Framer.
+- **GLB hosting:** raw.githubusercontent.com (5-min cache). jsDelivr pinned
+  to a commit is the suggested upgrade (Framer prop change only).
 - **Next session:** pick a static site generator (Astro / 11ty / Hugo),
   styling system (Tailwind or other), hosting (Vercel / Netlify /
   Cloudflare Pages), and form handler (Formspree / Netlify Forms /

@@ -1,8 +1,10 @@
 # Old New Club -- Progress
 
-> Last updated: 2026-03-18 (Session: Site review and GLB optimization)
+> Last updated: 2026-10-13 (Session: GLB viewer first-visit fix)
 
 ## Current Status
+
+2026-10-13: Fixed jackets failing on first visit. Root cause: three.js add-ons loaded in parallel with three.min.js and crashed when they arrived first (cold cache), plus an error-retry loop (~3,500 rebuilds in 30s). Fix lives in `GLB Model Viewer`; it must be pasted into the Framer code component and published to go live. Verified in a local harness that forces the race (old: 0/8 render, 5,174 errors; new: 8/8, 0 errors).
 
 Framer site is live and functional. GLB model files restored and optimized (63 MB down to 2.9 MB). Updated Framer code component with Draco decoder support. Tech stack decisions still pending for static site migration.
 
@@ -40,6 +42,7 @@ Framer site is live and functional. GLB model files restored and optimized (63 M
 - 2026-03-18: Prices are real ($150/$250), not inquiry-only. Updated product schema assumption.
 - 2026-03-18: Keep 3D model viewing (GLB) on the site. Optimized with Draco compression + WebP textures.
 - 2026-03-18: Migration priority: performance now, static site migration next, conversion/SEO later.
+- 2026-10-13: GLB viewer loads three.min.js first, then add-ons, via one page-wide promise. Error state no longer auto-retries (tap to retry). Draco decoder switched to WASM. Why: parallel async loads raced and the auto-retry looped.
 - 2026-05-21: Adopted in-repo MEMORY.md as the single source of truth for session memory (harness audit Phase 2 propagation). Added rule to CLAUDE.md: NEVER write durable memory to `~/.claude/projects/.../memory/` because it does not sync across devices.
 
 ## Open Questions

@@ -1,6 +1,51 @@
 import React, { useEffect, useRef, useState } from "react"
 import { addPropertyControls, ControlType } from "framer"
 
+const THREE_BASE = "https://unpkg.com/three@0.136.0"
+
+// Add one <script> tag and resolve once it has actually loaded
+function loadScript(url) {
+    return new Promise((resolve, reject) => {
+        const script = document.createElement("script")
+        script.src = url
+        script.async = true
+        script.onload = () => resolve()
+        script.onerror = () => reject(new Error(`Failed to load ${url}`))
+        document.head.appendChild(script)
+    })
+}
+
+// Page-wide shared load. The promise lives on window so every viewer
+// instance waits on the same download instead of starting its own.
+// On failure it is cleared, so a later retry starts fresh.
+function loadThreeOnce() {
+    if (!window._oncThreePromise) {
+        window._oncThreePromise = (async () => {
+            // Step 1: the core library, alone
+            if (!window.THREE) {
+                await loadScript(`${THREE_BASE}/build/three.min.js`)
+            }
+            // Step 2: the add-ons, now that THREE exists
+            await Promise.all([
+                loadScript(`${THREE_BASE}/examples/js/loaders/GLTFLoader.js`),
+                loadScript(`${THREE_BASE}/examples/js/loaders/DRACOLoader.js`),
+                loadScript(
+                    `${THREE_BASE}/examples/js/controls/OrbitControls.js`
+                ),
+            ])
+            const THREE = window.THREE
+            if (!THREE || !THREE.GLTFLoader || !THREE.DRACOLoader) {
+                throw new Error("Three.js add-ons did not register")
+            }
+            return THREE
+        })().catch((err) => {
+            window._oncThreePromise = null
+            throw err
+        })
+    }
+    return window._oncThreePromise
+}
+
 export default function ThreeDModel({
     glbUrl,
     cameraX = 0,
@@ -98,18 +143,17 @@ export default function ThreeDModel({
         return settings
     }
 
-    // Intersection Observer setup
+    // Intersection Observer setup. Created once per viewer: it only
+    // tracks visibility. It must not clear errors, or a failing load
+    // retries in a tight loop (each pass builds a new WebGL renderer).
     useEffect(() => {
+        const node = mountRef.current
         const observer = new IntersectionObserver(
             (entries) => {
                 const isVisible = entries[0].isIntersecting
                 setIsInViewport(isVisible)
 
-                if (isVisible && hasError) {
-                    setHasError(false)
-                }
-
-                if (isVisible && !isInitialized && !hasError) {
+                if (isVisible) {
                     setTimeout(() => {
                         setIsInitialized(true)
                     }, 100)
@@ -118,69 +162,22 @@ export default function ThreeDModel({
             { threshold: 0.1, rootMargin: "50px" }
         )
 
-        if (mountRef.current) {
-            observer.observe(mountRef.current)
+        if (node) {
+            observer.observe(node)
         }
 
         return () => {
-            if (mountRef.current) {
-                observer.unobserve(mountRef.current)
-            }
+            observer.disconnect()
         }
-    }, [isInitialized, hasError])
+    }, [])
 
-    // Load scripts utility
-    const loadScript = (url) => {
-        return new Promise((resolve, reject) => {
-            if (document.querySelector(`script[src="${url}"]`)) {
-                resolve("Script is already loaded")
-                return
-            }
-
-            const script = document.createElement("script")
-            script.src = url
-            script.async = true
-            script.onload = () => resolve("Script is loading")
-            script.onerror = () => reject(new Error(`Failed to load ${url}`))
-            document.head.appendChild(script)
-        })
-    }
-
-    // Load Three.js and dependencies (including Draco decoder)
+    // Load Three.js and its add-ons (GLTF, Draco, orbit controls).
+    // Every viewer on the page shares ONE load, and three.min.js must
+    // finish before the add-ons start: they attach themselves to the
+    // global THREE when they run, and crash if it is not there yet.
     const loadThree = async () => {
         try {
-            await Promise.all([
-                loadScript(
-                    "https://unpkg.com/three@0.136.0/build/three.min.js"
-                ),
-                loadScript(
-                    "https://unpkg.com/three@0.136.0/examples/js/loaders/GLTFLoader.js"
-                ),
-                loadScript(
-                    "https://unpkg.com/three@0.136.0/examples/js/loaders/DRACOLoader.js"
-                ),
-                loadScript(
-                    "https://unpkg.com/three@0.136.0/examples/js/controls/OrbitControls.js"
-                ),
-            ])
-
-            if (window.THREE && window.GLTFLoader && !window.THREE.GLTFLoader) {
-                window.THREE.GLTFLoader = window.GLTFLoader
-            }
-
-            if (window.THREE && window.DRACOLoader && !window.THREE.DRACOLoader) {
-                window.THREE.DRACOLoader = window.DRACOLoader
-            }
-
-            if (
-                window.THREE &&
-                window.OrbitControls &&
-                !window.THREE.OrbitControls
-            ) {
-                window.THREE.OrbitControls = window.OrbitControls
-            }
-
-            return window.THREE
+            return await loadThreeOnce()
         } catch (err) {
             console.error("Failed to load Three.js:", err)
             setHasError(true)
@@ -476,11 +473,15 @@ export default function ThreeDModel({
                     dracoLoader.setDecoderPath(
                         "https://unpkg.com/three@0.136.0/examples/js/libs/draco/"
                     )
-                    dracoLoader.setDecoderConfig({ type: "js" })
+                    // WebAssembly decoder: much faster than the pure-JS one
+                    dracoLoader.setDecoderConfig({ type: "wasm" })
                     loader.setDRACOLoader(dracoLoader)
 
+                    // Local flag: the isModelLoaded state captured here
+                    // would always read false inside this timer
+                    let loaded = false
                     const loadTimeout = setTimeout(() => {
-                        if (!isModelLoaded && state.isMounted) {
+                        if (!loaded && state.isMounted) {
                             console.warn("Model loading timeout")
                             setHasError(true)
                         }
@@ -489,6 +490,7 @@ export default function ThreeDModel({
                     loader.load(
                         glbUrl,
                         (gltf) => {
+                            loaded = true
                             clearTimeout(loadTimeout)
                             if (!state.isMounted) return
 
@@ -644,7 +646,9 @@ export default function ThreeDModel({
         >
             {hasError && (
                 <div
+                    onClick={() => setHasError(false)}
                     style={{
+                        cursor: "pointer",
                         width: "100%",
                         height: "100%",
                         display: "flex",
@@ -659,7 +663,7 @@ export default function ThreeDModel({
                     <div style={{ textAlign: "center" }}>
                         <div>Model loading issue</div>
                         <div style={{ marginTop: "8px", fontSize: "12px" }}>
-                            Try refreshing the page
+                            Tap to retry
                         </div>
                     </div>
                 </div>
