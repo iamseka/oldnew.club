@@ -1,6 +1,6 @@
 # MEMORY.md -- Persistent Memory Across Sessions
 
-> Claude reads this at session start. Keep under 100 lines.
+> Claude reads this at session start. Durable context only; session detail goes in progress.md.
 > Chronological detail lives in progress.md; durable architecture, state,
 > and decisions live here.
 
