@@ -1,12 +1,44 @@
 # Old New Club -- Progress
 
-> Last updated: 2026-10-13 (Session: GLB viewer first-visit fix)
+> Last updated: 2026-10-29 (Session: Framer -> Cloudflare Pages port)
 
 ## Current Status
+
+2026-10-29: Framer cancelled (ends 11/4). Picked a hand-written static site; host went Netlify -> Cloudflare Pages the same day (Netlify free pauses sites after 300 credits/month). Captured the Framer page (screenshots + computed styles at 1440/900/390, viewer settings from the bundle). Built `site/` on branch `cloudflare-migration`: index.html, styles.css (Framer's exact breakpoints and fallback fonts), viewer.js (plain-JS port, same fixes), self-hosted OFL fonts, GLBs. Text layout matches Framer within 1px at all three widths, page heights identical. `scripts/check-viewers.py`: 12/12 pass locally (3 cold desktop runs 4/4, phone scroll + teardown, fail -> tap to retry), and 6 FAIL with models removed (proves the check works). Next: Cloudflare account + zone setup, nameserver switch, Email Routing, then Pages project and cutover. Plan: ~/.claude/plans/my-framer-subscription-is-snazzy-willow.md
 
 2026-10-13: Fixed jackets failing on first visit. Root cause: three.js add-ons loaded in parallel with three.min.js and crashed when they arrived first (cold cache), plus an error-retry loop (~3,500 rebuilds in 30s). Fix lives in `GLB Model Viewer`; pasted into Framer and published 2026-10-13; live check passed (3 cold-cache runs: 4/4 jackets, 0 console errors, WASM Draco). Verified in a local harness that forces the race (old: 0/8 render, 5,174 errors; new: 8/8, 0 errors).
 
 Framer site is live and functional. GLB model files restored and optimized (63 MB down to 2.9 MB). Updated Framer code component with Draco decoder support. Tech stack decisions still pending for static site migration.
+
+## 2026-10-29 -- Framer port built, host moved to Cloudflare Pages
+
+**Branch / repo state:** `cloudflare-migration` (not merged; main untouched so Framer keeps loading root GLBs)
+
+### Accomplished
+- Captured the Framer site: screenshots + computed styles at 1440/900/390, per-jacket viewer settings, icons, favicons, OG image (docs/references/framer-capture/).
+- Built site/: index.html, styles.css, viewer.js (plain-JS port of GLB Model Viewer), 39 self-hosted OFL font subsets, GLB copies, _headers, robots, sitemap.
+- Text layout within 1px of Framer at all 3 widths; page heights identical.
+- Added scripts/check-viewers.py (12/12 pass locally; 6 FAIL with models removed) and scripts/fetch-fonts.py.
+
+### Decisions Made
+- **Decision**: Cloudflare Pages, not Netlify. **Why**: Netlify free pauses the site after 300 credits/month (~3,500-4,000 visits).
+- **Decision**: Nameservers + inquire@ move to Cloudflare (Email Routing -> Seka's Gmail, no catch-all). **Why**: bare domain needs the zone on Cloudflare; Namecheap forwarding dies off Namecheap DNS.
+- **Decision**: 1:1 port, no generator. **Why**: one page, one-week deadline.
+
+### Next Steps
+- (blocking, by Fri 10/31) Seka adds oldnew.club to Cloudflare, prunes records, switches nameservers at Namecheap, enables Email Routing, test mail.
+- Create Pages project from repo (output `site`, no build), run check-viewers.py on the preview, Seka signs off.
+- Sun 11/2 cutover: merge, attach domains, root -> www redirect rule.
+
+### Open Questions
+- Club glyph renders in Arial (Framer quirk); fix later?
+- Keep mailto or add a form later?
+
+### Blockers
+- Seka's Cloudflare dashboard + Namecheap nameserver steps.
+
+### Pointers for Next Session
+- MEMORY.md (Current State, move order), docs/decisions.md (last 3 entries), docs/plans/2026-10-29-my-framer-subscription-is-snazzy-willow.md
 
 ## Scope
 
@@ -47,7 +79,5 @@ Framer site is live and functional. GLB model files restored and optimized (63 M
 
 ## Open Questions
 
-- Static site generator: Astro, 11ty, or Hugo?
-- Styling: Tailwind CSS or something else?
-- Hosting: Vercel, Netlify, or Cloudflare Pages?
-- Form handling: Formspree, Netlify Forms, or serverless function?
+- Logo club symbol is drawn in Arial (Framer quirk, kept for the 1:1 port); Android without Arial falls back. Fix later?
+- Inquiry: keep mailto, or add a form in a later slice?

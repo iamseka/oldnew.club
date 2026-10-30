@@ -16,7 +16,7 @@ node_modules/
 *.env.local
 .env.*
 
-# Build output (update when SSG is chosen)
+# Build output (none today: site/ is served as-is, no build step)
 dist/
 _site/
 public/build/
@@ -25,3 +25,8 @@ public/build/
 # Media pipeline output (generated during build)
 **/optimized/
 **/thumbnails/
+
+# Framer capture: Framer's own JS bundles and page HTML stay local only
+# (this repo is public). Screenshots and measurements are committed.
+docs/references/framer-capture/mods/
+docs/references/framer-capture/live.html

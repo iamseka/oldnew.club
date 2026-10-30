@@ -4,23 +4,31 @@
 > Chronological detail lives in progress.md; durable architecture, state,
 > and decisions live here.
 
-## Current State (as of 2026-10-13)
+## Current State (as of 2026-10-29)
 
-- **Phase:** Scaffolded; tech stack decisions still pending for static
-  site migration.
-- **Live site:** Framer is currently live and functional.
-- **3D assets:** GLB model files optimized 63 MB -> 2.9 MB via Draco
-  compression + WebP textures. Framer code component updated with Draco
-  decoder support.
-- **Viewer fix (2026-10-13):** `GLB Model Viewer` fixed for the cold-cache
-  load race and retry loop. Source of truth is the repo file; Framer runs a
-  pasted copy, so every change needs a paste + publish in Framer.
-- **GLB hosting:** raw.githubusercontent.com (5-min cache). jsDelivr pinned
-  to a commit is the suggested upgrade (Framer prop change only).
-- **Next session:** pick a static site generator (Astro / 11ty / Hugo),
-  styling system (Tailwind or other), hosting (Vercel / Netlify /
-  Cloudflare Pages), and form handler (Formspree / Netlify Forms /
-  serverless). Log the picks in `docs/decisions.md`.
+- **Deadline:** Framer is cancelled; paid period ends **2026-11-04**. Cutover
+  target **Sun 2026-11-02**.
+- **Host:** Cloudflare Pages (switched from Netlify the same day: Netlify's
+  free plan pauses the site after 300 credits/month). See docs/decisions.md.
+- **Built (branch `cloudflare-migration`, not merged):** `site/` is a 1:1 port
+  of the Framer page. Matches Framer at 1440/900/390 (same page heights, all
+  text within 1px). `scripts/check-viewers.py` passes 12/12 locally and was
+  shown to fail with the models removed.
+- **DNS today (Namecheap BasicDNS):** apex A = 31.43.160.6 + 31.43.161.6
+  (Framer) **plus 162.255.119.127**, a Namecheap URL redirect that answers
+  HTTP only and times out on HTTPS (about 1 in 3 https://oldnew.club visits
+  fail today). www CNAME sites.framer.app. MX eforward1-5 + SPF TXT =
+  Namecheap email forwarding for inquire@.
+- **Move order (keeps the site up the whole way):** 1) add zone to
+  Cloudflare, keep Framer records DNS-only (grey cloud), drop the
+  162.255.119.127 record; 2) Seka switches nameservers at Namecheap;
+  3) once active, turn on Email Routing (inquire@ -> Seka's Gmail; no catch-all) and test;
+  4) on cutover day attach www + apex to the Pages project and add the
+  apex -> www redirect rule. Rollback before 11/4 = point records back at
+  Framer inside Cloudflare.
+- **Root-level GLBs stay until Framer lapses**: the live Framer viewer loads
+  them from raw.githubusercontent.com/.../main/. Delete after 11/4, along with
+  the root `GLB Model Viewer` (ask Seka first).
 
 ## Architecture State
 
@@ -41,6 +49,14 @@
   Draco + WebP textures.
 - **Migration priority (2026-03-18):** performance now, static-site
   migration next, conversion + SEO later.
+- **Host + stack (2026-10-29):** Cloudflare Pages free, hand-written static
+  `site/`, no generator. Why: no bandwidth cap that can pause the site
+  (Netlify free does), one page, one-week deadline.
+- **DNS + email to Cloudflare (2026-10-29):** the bare domain needs the zone
+  on Cloudflare, and Namecheap forwarding dies off Namecheap DNS, so
+  inquire@ moves to Cloudflare Email Routing.
+- **1:1 port first (2026-10-29):** match Framer exactly; content-driven
+  collection is a later slice.
 
 ## Brand Identity (carryover from Framer)
 
@@ -52,10 +68,10 @@
 
 ## Open Questions
 
-- Static site generator: Astro, 11ty, or Hugo?
-- Styling: Tailwind CSS or something else?
-- Hosting: Vercel, Netlify, or Cloudflare Pages?
-- Form handling: Formspree, Netlify Forms, or serverless function?
+- Logo club symbol is drawn in Arial (Framer quirk, kept for 1:1). Devices
+  without Arial (most Android) fall back to another font. Fix later?
+- Inquiry: keep mailto, or add a form (e.g. Formspree or a Pages Function) in a later slice?
+- three.js still loads from unpkg; self-host it in a later slice?
 
 ## Instructions for Claude
 

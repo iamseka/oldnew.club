@@ -5,8 +5,8 @@ Marketing website for Old New Club -- an upcycled fashion brand that hand-paints
 ## Quick Context
 
 - **Domain**: Upcycled fashion brand website (migration from Framer to self-hosted static site)
-- **Tech stack**: TBD -- see docs/architecture.md for options under consideration
-- **Status**: Scaffolded -- not yet implemented
+- **Tech stack**: hand-written static site in `site/` (HTML, CSS, plain JS + three.js r0.136 from unpkg), hosted on Cloudflare Pages (free), DNS + email routing on Cloudflare (registrar stays Namecheap). No build step
+- **Status**: 1:1 port of the Framer page built on branch `cloudflare-migration`; Cloudflare setup + DNS cutover pending (Framer lapses 2026-11-04)
 
 ## IMPORTANT: Memory Storage
 
@@ -19,7 +19,13 @@ MEMORY.md.
 
 ## Project Structure
 
-- `modules/` -- Core components. Each has a MODULE.md with purpose and interfaces
+- `site/` -- The live site, served as-is by Cloudflare Pages (output folder `site`, no build; `site/_headers` sets caching)
+  - `viewer.js` -- 3D jacket viewer (plain-JS port of `GLB Model Viewer`)
+  - `glb/`, `fonts/`, `images/` -- models, self-hosted OFL fonts, icons + share image
+- `scripts/check-viewers.py` -- viewer checks against any URL (run before and after deploys)
+- `scripts/fetch-fonts.py` -- re-downloads fonts into `site/fonts/`
+- `docs/references/framer-capture/` -- screenshots + measurements of the Framer site (the 1:1 reference)
+- `modules/` -- Core components (planning docs from the March scaffold). Each has a MODULE.md with purpose and interfaces
   - `site-engine/` -- Static site generator config and templates
   - `content-layer/` -- Content schema and structure definitions
   - `media-pipeline/` -- Image/video optimization for Scaniverse exports
@@ -44,7 +50,6 @@ MEMORY.md.
 - Log architectural decisions in docs/decisions.md (append, never edit)
 - Update progress.md after completing any P0 or P1 task
 - Ask before introducing new dependencies not listed in architecture.md
-- Tech stack choices are TBD -- decide and log in docs/decisions.md before implementing
 - Adding a product should only require a new markdown file and images in content/products/
 - Brand identity carries over from Framer site: #c20e0e red, Old English + Rock 3D fonts, EB Garamond body text
 - No user data stored. No accounts. No payment processing.

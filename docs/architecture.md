@@ -54,10 +54,11 @@ Site Form  -->  Inquiry Handler  -->  Email notification
 
 ## Tech Stack
 
-- **Static site generator**: TBD (options: Astro, 11ty, Hugo)
-- **Styling**: TBD (Tailwind CSS likely)
-- **Hosting**: TBD (options: Vercel, Netlify, Cloudflare Pages)
-- **Form handling**: TBD (options: Formspree, Netlify Forms, serverless function)
+- **Static site generator**: none (decided 2026-10-29). Hand-written files in `site/`
+- **Styling**: plain CSS (`site/styles.css`)
+- **Hosting**: Cloudflare Pages free plan, deploys from GitHub. Nameservers on Cloudflare; Namecheap stays the registrar
+- **Email**: inquire@oldnew.club forwards via Cloudflare Email Routing
+- **Form handling**: none yet; inquiries are a mailto link (TBD for a later slice)
 - **Image optimization**: TBD (likely sharp or similar, integrated into build)
 - **Fonts**: UnifrakturCook (Old English logo), Rock 3D (logo "N"), EB Garamond (body), Inter Display
 - **Brand color**: #c20e0e (red)

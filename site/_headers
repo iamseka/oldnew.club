@@ -1,0 +1,10 @@
+# Cloudflare Pages response headers for oldnew.club.
+
+# 3D models: browsers keep them a week. If a jacket model is replaced
+# under the same file name, visitors see the new one within 7 days.
+/glb/*
+  Cache-Control: public, max-age=604800
+
+# Font file names change whenever the font does, so they can be kept a year.
+/fonts/*
+  Cache-Control: public, max-age=31536000, immutable
