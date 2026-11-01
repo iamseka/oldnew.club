@@ -4,7 +4,11 @@
 > Chronological detail lives in progress.md; durable architecture, state,
 > and decisions live here.
 
-## Current State (as of 2026-10-31)
+## Current State (as of 2026-11-01)
+
+- **2026-11-01:** Pages project `oldnew-club` live, `site/` merged to main,
+  production at oldnew-club.pages.dev passes check-viewers. Remaining:
+  custom domains + root->www redirect rule (Seka), then verify.
 
 - **Deadline:** Framer is cancelled; paid period ends **2026-11-04**. Cutover
   target **Sun 2026-11-02**.

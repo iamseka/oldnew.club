@@ -10,6 +10,31 @@
 
 Framer site is live and functional. GLB model files restored and optimized (63 MB down to 2.9 MB). Updated Framer code component with Draco decoder support. Tech stack decisions still pending for static site migration.
 
+## 2026-11-01 -- Pages project live, merged to main
+
+**Branch / repo state:** `main` (fast-forwarded from `cloudflare-migration` at c70f84d)
+
+### Accomplished
+- Seka created the Cloudflare Pages project `oldnew-club` (Git: iamseka/oldnew.club, production `main`, output `site`, no build). First build failed as expected (main had no site/ yet).
+- Preview https://cloudflare-migration.oldnew-club.pages.dev/: check-viewers 12/12 PASS; render-vs-reference at 1440/900/390 matches Framer (heights 900/1456/2407 identical; only jacket spin angle differs); GLB cache header confirmed. Seka approved.
+- Merged to main; production https://oldnew-club.pages.dev/ check-viewers ALL PASS. Root GLBs kept, Framer's raw.githubusercontent GLB URLs still 200.
+
+### Decisions Made
+None new.
+
+### Next Steps
+- (blocking, before 11/4) Seka: Pages project -> Custom domains -> add www.oldnew.club and oldnew.club; Redirect Rule "root to WWW" (301). Then re-run check-viewers + dig/curl against https://www.oldnew.club/.
+- After 11/4: delete root GLBs + `GLB Model Viewer` (ask Seka).
+
+### Open Questions
+None.
+
+### Blockers
+None.
+
+### Pointers for Next Session
+- MEMORY.md, progress.md, scripts/check-viewers.py
+
 ## 2026-10-31 -- Cloudflare zone live, Email Routing on
 
 **Branch / repo state:** `cloudflare-migration` (main untouched)
