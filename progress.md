@@ -4,11 +4,39 @@
 
 ## Current Status
 
-2026-10-29: Framer cancelled (ends 11/4). Picked a hand-written static site; host went Netlify -> Cloudflare Pages the same day (Netlify free pauses sites after 300 credits/month). Captured the Framer page (screenshots + computed styles at 1440/900/390, viewer settings from the bundle). Built `site/` on branch `cloudflare-migration`: index.html, styles.css (Framer's exact breakpoints and fallback fonts), viewer.js (plain-JS port, same fixes), self-hosted OFL fonts, GLBs. Text layout matches Framer within 1px at all three widths, page heights identical. `scripts/check-viewers.py`: 12/12 pass locally (3 cold desktop runs 4/4, phone scroll + teardown, fail -> tap to retry), and 6 FAIL with models removed (proves the check works). Next: Cloudflare account + zone setup, nameserver switch, Email Routing, then Pages project and cutover. Plan: ~/.claude/plans/my-framer-subscription-is-snazzy-willow.md
+2026-10-29: Framer cancelled (ends 11/4). Picked a hand-written static site; host went Netlify -> Cloudflare Pages the same day (Netlify free pauses sites after 300 credits/month). Captured the Framer page (screenshots + computed styles at 1440/900/390, viewer settings from the bundle). Built `site/` on branch `cloudflare-migration`: index.html, styles.css (Framer's exact breakpoints and fallback fonts), viewer.js (plain-JS port, same fixes), self-hosted OFL fonts, GLBs. Text layout matches Framer within 1px at all three widths, page heights identical. `scripts/check-viewers.py`: 12/12 pass locally (3 cold desktop runs 4/4, phone scroll + teardown, fail -> tap to retry), and 6 FAIL with models removed (proves the check works). 2026-10-31: Cloudflare zone, nameservers and Email Routing done and verified. Next: Pages project, preview check, cutover Sun 11/2. Plan: ~/.claude/plans/my-framer-subscription-is-snazzy-willow.md
 
 2026-10-13: Fixed jackets failing on first visit. Root cause: three.js add-ons loaded in parallel with three.min.js and crashed when they arrived first (cold cache), plus an error-retry loop (~3,500 rebuilds in 30s). Fix lives in `GLB Model Viewer`; pasted into Framer and published 2026-10-13; live check passed (3 cold-cache runs: 4/4 jackets, 0 console errors, WASM Draco). Verified in a local harness that forces the race (old: 0/8 render, 5,174 errors; new: 8/8, 0 errors).
 
 Framer site is live and functional. GLB model files restored and optimized (63 MB down to 2.9 MB). Updated Framer code component with Draco decoder support. Tech stack decisions still pending for static site migration.
+
+## 2026-10-31 -- Cloudflare zone live, Email Routing on
+
+**Branch / repo state:** `cloudflare-migration` (main untouched)
+
+### Accomplished
+- Seka moved oldnew.club to Cloudflare DNS and switched nameservers at Namecheap; verified kaiser/raphaela at the registry.
+- Stray 162.255.119.127 apex record removed; the 1-in-3 HTTPS timeout on the bare domain is gone.
+- Email Routing activated: MX route1-3, SPF and DKIM verified via dig; inquire@ rule -> Seka's Gmail (destination fixed after inquire@ was first added as its own destination).
+- Site still served by Framer (www 200, apex 308 -> www).
+
+### Decisions Made
+None this session (executed the 2026-10-29 plan).
+
+### Next Steps
+- (blocking, before Sun 11/2) Create the Pages project: Connect to Git iamseka/oldnew.club, production branch main, framework None, no build, output `site`.
+- Run `python3 -I scripts/check-viewers.py <preview-url>` + render-vs-reference on the branch preview; Seka signs off.
+- Sun 11/2 cutover: merge to main, add www + apex custom domains, root -> www 301 Redirect Rule, verify.
+- After 11/4: delete root GLBs + root `GLB Model Viewer` (ask Seka).
+
+### Open Questions
+- None new. Test email to inquire@ reported done by Seka; not independently confirmed from here.
+
+### Blockers
+None.
+
+### Pointers for Next Session
+- MEMORY.md, progress.md, docs/plans/2026-10-29-my-framer-subscription-is-snazzy-willow.md, scripts/check-viewers.py
 
 ## 2026-10-29 -- Framer port built, host moved to Cloudflare Pages
 

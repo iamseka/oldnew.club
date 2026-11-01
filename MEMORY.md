@@ -4,7 +4,7 @@
 > Chronological detail lives in progress.md; durable architecture, state,
 > and decisions live here.
 
-## Current State (as of 2026-10-29)
+## Current State (as of 2026-10-31)
 
 - **Deadline:** Framer is cancelled; paid period ends **2026-11-04**. Cutover
   target **Sun 2026-11-02**.
@@ -14,12 +14,14 @@
   of the Framer page. Matches Framer at 1440/900/390 (same page heights, all
   text within 1px). `scripts/check-viewers.py` passes 12/12 locally and was
   shown to fail with the models removed.
-- **DNS today (Namecheap BasicDNS):** apex A = 31.43.160.6 + 31.43.161.6
-  (Framer) **plus 162.255.119.127**, a Namecheap URL redirect that answers
-  HTTP only and times out on HTTPS (about 1 in 3 https://oldnew.club visits
-  fail today). www CNAME sites.framer.app. MX eforward1-5 + SPF TXT =
-  Namecheap email forwarding for inquire@.
-- **Move order (keeps the site up the whole way):** 1) add zone to
+- **DNS today (Cloudflare, verified 2026-10-31):** nameservers
+  kaiser/raphaela.ns.cloudflare.com. Apex A = 31.43.160.6 + 31.43.161.6
+  (Framer, DNS only); www CNAME sites.framer.app. The stray Namecheap
+  redirect (162.255.119.127) is deleted. Email Routing active: MX
+  route1-3.mx.cloudflare.net, SPF + DKIM (cf2024-1) live; inquire@ ->
+  Seka's Gmail. Gotcha: the destination address is the Gmail, never
+  inquire@ itself (that can never verify).
+- **Move order (keeps the site up the whole way; steps 1-3 DONE 2026-10-31):** 1) add zone to
   Cloudflare, keep Framer records DNS-only (grey cloud), drop the
   162.255.119.127 record; 2) Seka switches nameservers at Namecheap;
   3) once active, turn on Email Routing (inquire@ -> Seka's Gmail; no catch-all) and test;
